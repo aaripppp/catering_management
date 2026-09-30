@@ -1,0 +1,257 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* Primary action colour (blue) */
+    --color-brand-50: #eff6ff;
+    --color-brand-100: #dbeafe;
+    --color-brand-200: #bfdbfe;
+    --color-brand-500: #3b82f6;
+    --color-brand-600: #2563eb;
+    --color-brand-700: #1d4ed8;
+    --color-brand-800: #1e40af;
+
+    /* Navy — sidebar / dark surfaces */
+    --color-navy-700: #16264a;
+    --color-navy-800: #0f1e3d;
+    --color-navy-900: #0b1830;
+    --color-navy-950: #070f21;
+}
+
+@layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+        @apply bg-slate-50 text-slate-800 antialiased;
+    }
+
+    /* Consistent focus ring across the whole app */
+    :focus-visible {
+        @apply outline-none ring-2 ring-blue-500/60 ring-offset-2 ring-offset-white;
+    }
+}
+
+@layer components {
+    /* ------------------------------------------------------------------
+     Buttons
+    ------------------------------------------------------------------ */
+    .btn {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition
+            disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-sm {
+        @apply px-3 py-1.5 text-xs;
+    }
+
+    .btn-primary {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-secondary {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-ghost {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-danger {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 active:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-danger-soft {
+        @apply inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    /* ------------------------------------------------------------------
+     Surfaces
+    ------------------------------------------------------------------ */
+    .card {
+        @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    }
+
+    .card-body {
+        @apply p-5 sm:p-6;
+    }
+
+    .card-header {
+        @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 sm:px-6;
+    }
+
+    .card-title {
+        @apply text-base font-semibold text-slate-900;
+    }
+
+    .section-title {
+        @apply text-sm font-semibold text-slate-900;
+    }
+
+    .muted {
+        @apply text-sm text-slate-500;
+    }
+
+    /* ------------------------------------------------------------------
+     Forms
+    ------------------------------------------------------------------ */
+    .label {
+        @apply mb-1.5 block text-sm font-medium text-slate-700;
+    }
+
+    .input {
+        @apply block w-full rounded-lg border-slate-300 bg-white text-sm text-slate-800 shadow-sm
+            transition placeholder:text-slate-400
+            focus:border-blue-500 focus:ring-blue-500;
+    }
+
+    .select {
+        @apply block w-full rounded-lg border-slate-300 bg-white pr-9 text-sm text-slate-800 shadow-sm transition focus:border-blue-500 focus:ring-blue-500;
+    }
+
+    .field-error {
+        @apply mt-1.5 text-sm text-red-600;
+    }
+
+    .checkbox {
+        @apply rounded border-slate-300 text-blue-600 shadow-sm focus:ring-blue-500;
+    }
+
+    /* Icon sitting inside the left edge of an input */
+    .input-icon {
+        @apply pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400;
+    }
+
+    .input-has-icon {
+        @apply pl-9;
+    }
+
+    /* ------------------------------------------------------------------
+     Tables
+    ------------------------------------------------------------------ */
+    .table-wrap {
+        @apply overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm;
+    }
+
+    .table {
+        @apply min-w-full divide-y divide-slate-200 text-sm;
+    }
+
+    .table thead {
+        @apply bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+    }
+
+    .table th {
+        @apply px-4 py-3 font-semibold;
+    }
+
+    .table tbody {
+        @apply divide-y divide-slate-100;
+    }
+
+    .table td {
+        @apply px-4 py-3;
+    }
+
+    .table tbody tr {
+        @apply transition hover:bg-slate-50/80;
+    }
+
+    /* Compact rows for the participant list inside the dashboard detail modal,
+       so a long class stays readable without the modal growing too tall. */
+    .recap-detail-table th {
+        @apply px-4 py-2;
+    }
+
+    .recap-detail-table td {
+        @apply px-4 py-2;
+    }
+
+    /* ------------------------------------------------------------------
+     Badges
+    ------------------------------------------------------------------ */
+    .badge {
+        @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;
+    }
+
+    .badge-success {
+        @apply inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700;
+    }
+
+    .badge-neutral {
+        @apply inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600;
+    }
+
+    .badge-info {
+        @apply inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700;
+    }
+
+    .badge-danger {
+        @apply inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700;
+    }
+
+    /* ------------------------------------------------------------------
+     Sidebar
+    ------------------------------------------------------------------ */
+    .sidebar-link {
+        @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition;
+    }
+
+    .sidebar-link-active {
+        @apply bg-blue-600 text-white shadow-sm shadow-blue-950/30;
+    }
+
+    .sidebar-link-idle {
+        @apply text-slate-400 hover:bg-white/5 hover:text-white;
+    }
+
+    .sidebar-link-disabled {
+        @apply cursor-not-allowed text-slate-600 hover:bg-transparent hover:text-slate-600;
+    }
+
+    .sidebar-heading {
+        @apply px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+    }
+
+    /* ------------------------------------------------------------------
+     Feedback
+    ------------------------------------------------------------------ */
+    .alert {
+        @apply rounded-lg border px-4 py-3 text-sm;
+    }
+
+    .alert-success {
+        @apply rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800;
+    }
+
+    .alert-info {
+        @apply rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800;
+    }
+
+    .alert-danger {
+        @apply rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800;
+    }
+
+    /* Soft blue tile used behind dashboard icons */
+    .icon-box {
+        @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600;
+    }
+
+    /* ------------------------------------------------------------------
+     Modal
+    ------------------------------------------------------------------ */
+    .modal-backdrop {
+        @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px];
+    }
+
+    .modal-panel {
+        @apply w-full rounded-xl bg-white shadow-xl;
+    }
+}
