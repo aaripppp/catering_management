@@ -5,6 +5,12 @@ use App\Models\CateringAttendance;
 use App\Models\CateringMember;
 use Illuminate\Database\QueryException;
 
+it('defines the tidak ikut attendance status', function () {
+    expect(CateringAttendanceStatus::TidakIkut->value)->toBe('tidak_ikut')
+        ->and(CateringAttendanceStatus::TidakIkut->label())->toBe('Tidak Ikut')
+        ->and(CateringAttendanceStatus::TidakIkut->shorthand())->toBe('T');
+});
+
 it('creates attendance with typed status and date for a catering member', function () {
     $member = CateringMember::factory()->create();
     $attendance = CateringAttendance::factory()->for($member)->create([

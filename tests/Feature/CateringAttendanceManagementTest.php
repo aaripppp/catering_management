@@ -180,6 +180,7 @@ it('uses saved attendance instead of the weekday default', function (CateringAtt
     'saved sakit' => [CateringAttendanceStatus::Sakit],
     'saved izin' => [CateringAttendanceStatus::Izin],
     'saved alfa' => [CateringAttendanceStatus::Alfa],
+    'saved tidak ikut' => [CateringAttendanceStatus::TidakIkut],
 ]);
 
 it('marks and restores a whole weekday column', function () {
@@ -219,11 +220,11 @@ it('updates an existing cell without creating a duplicate row', function () {
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
     $component = openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass);
 
-    $component->call('setCellStatus', $member->id, '2026-09-01', 'izin')
+    $component->call('setCellStatus', $member->id, '2026-09-01', 'tidak_ikut')
         ->assertHasNoErrors();
 
     expect(CateringAttendance::query()->count())->toBe(30);
-    expect(attendanceStatusOn($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Izin);
+    expect(attendanceStatusOn($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::TidakIkut);
 });
 
 it('does not change attendance belonging to another class', function () {
@@ -278,12 +279,25 @@ it('reloads all previously saved statuses for the same class and month', functio
         ->call('setCellStatus', $member->id, '2026-09-01', 'sakit')
         ->call('setCellStatus', $member->id, '2026-09-02', 'izin')
         ->call('setCellStatus', $member->id, '2026-09-03', 'alfa')
+        ->call('setCellStatus', $member->id, '2026-09-04', 'tidak_ikut')
         ->assertHasNoErrors();
 
     openCateringAttendanceMatrix($user, $schoolClass)
         ->assertSet("attendance.{$member->id}.2026-09-01", 'sakit')
         ->assertSet("attendance.{$member->id}.2026-09-02", 'izin')
-        ->assertSet("attendance.{$member->id}.2026-09-03", 'alfa');
+        ->assertSet("attendance.{$member->id}.2026-09-03", 'alfa')
+        ->assertSet("attendance.{$member->id}.2026-09-04", 'tidak_ikut');
+});
+
+it('renders tidak ikut in the attendance modal with violet styling', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+
+    openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->assertSee('Tidak Ikut')
+        ->assertSeeHtml('border-violet-800 bg-violet-600 text-white hover:bg-violet-700 focus-visible:ring-violet-300')
+        ->assertSeeHtml('scale-[1.03] shadow-md ring-4 ring-emerald-300 ring-offset-2');
 });
 
 it('requires a participant group before a matrix can be loaded', function () {
@@ -399,11 +413,13 @@ it('summarizes current matrix state without counting libur as an absence', funct
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $member->id, '2026-09-01', 'sakit')
+        ->call('setCellStatus', $member->id, '2026-09-02', 'tidak_ikut')
         ->assertViewHas('summary', fn (array $summary): bool => $summary === [
             'participants' => 1,
-            'ikut' => 21,
+            'ikut' => 20,
             'sakit' => 1,
             'izin' => 0,
             'alfa' => 0,
+            'tidak_ikut' => 1,
         ]);
 });

@@ -95,9 +95,12 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
                 <div>
-                    <p class="text-sm font-semibold">0 Porsi · Libur / tidak ada catering</p>
+                    <p class="text-sm font-semibold">
+                        0 Porsi · {{ $recap['liburRows'] === $recap['savedRows'] ? 'Libur / tidak ada catering' : 'Tidak ada peserta yang ikut' }}
+                    </p>
                     <p class="mt-0.5 text-xs">
-                        {{ number_format($recap['liburRows'], 0, ',', '.') }} baris berstatus libur pada tanggal ini.
+                        {{ number_format($recap['tidakIkutRows'], 0, ',', '.') }} baris Tidak Ikut &middot;
+                        {{ number_format($recap['liburRows'], 0, ',', '.') }} baris Libur.
                     </p>
                 </div>
             </section>

@@ -732,7 +732,7 @@ class Index extends Component
         ];
     }
 
-    /** @return array{participants: int, ikut: int, sakit: int, izin: int, alfa: int} */
+    /** @return array{participants: int, ikut: int, sakit: int, izin: int, alfa: int, tidak_ikut: int} */
     private function summary(): array
     {
         $summary = [
@@ -741,6 +741,7 @@ class Index extends Component
             'sakit' => 0,
             'izin' => 0,
             'alfa' => 0,
+            'tidak_ikut' => 0,
         ];
 
         foreach ($this->attendance as $statuses) {

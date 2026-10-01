@@ -46,6 +46,7 @@ class CateringRequirementRecapService
         $recap['hasSavedData'] = $dayStats['total'] > 0;
         $recap['savedRows'] = $dayStats['total'];
         $recap['liburRows'] = $dayStats['libur'];
+        $recap['tidakIkutRows'] = $dayStats['tidakIkut'];
         $recap['activeParticipants'] = $coverage['participants'];
         $recap['activeStudents'] = $coverage['students'];
         $recap['activeEmployees'] = $coverage['employees'];
@@ -192,7 +193,7 @@ class CateringRequirementRecapService
     /**
      * Whether the date has any saved attendance at all, and how much of it is libur.
      *
-     * @return array{total: int, libur: int}
+     * @return array{total: int, libur: int, tidakIkut: int}
      */
     private static function dayStats(string $dateString): array
     {
@@ -206,11 +207,16 @@ class CateringRequirementRecapService
                 'SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as libur',
                 [CateringAttendanceStatus::Libur->value],
             )
+            ->selectRaw(
+                'SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as tidak_ikut',
+                [CateringAttendanceStatus::TidakIkut->value],
+            )
             ->first();
 
         return [
             'total' => (int) ($stats->total ?? 0),
             'libur' => (int) ($stats->libur ?? 0),
+            'tidakIkut' => (int) ($stats->tidak_ikut ?? 0),
         ];
     }
 
@@ -252,6 +258,7 @@ class CateringRequirementRecapService
             'hasSavedData' => false,
             'savedRows' => 0,
             'liburRows' => 0,
+            'tidakIkutRows' => 0,
             'totalPortions' => 0,
             'activeParticipants' => 0,
             'activeStudents' => 0,

@@ -6,6 +6,7 @@ use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
 use App\Models\SchoolClass;
+use App\Services\CateringAttendanceInitializerService;
 use App\Services\CateringInvoiceService;
 use Carbon\CarbonImmutable;
 
@@ -101,4 +102,128 @@ it('fails loudly instead of writing a broken archive when no invoice qualifies',
 
     expect(fn (): mixed => $service->bulkZipResponse([], '7A', $start))
         ->toThrow(RuntimeException::class, 'tidak ada invoice yang dihasilkan');
+});
+
+it('writes a reviewable october sample whose weekends are absent from the pdf', function () {
+    $outputDir = sys_get_temp_dir().'/cattering-invoice-verification';
+
+    if (! is_dir($outputDir)) {
+        mkdir($outputDir, 0755, true);
+    }
+
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
+    $members = CateringMember::factory()->count(2)->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+
+    // The attendance page initialises the whole month: weekdays "ikut", weekends "libur".
+    CateringAttendanceInitializerService::ensureMonth(2026, 10);
+
+    foreach ($members as $index => $member) {
+        CateringAttendance::query()
+            ->where('catering_member_id', $member->id)
+            ->whereDate('attendance_date', '2026-10-09')
+            ->update(['status' => CateringAttendanceStatus::Libur->value]);
+
+        if ($index === 1) {
+            CateringAttendance::query()
+                ->where('catering_member_id', $member->id)
+                ->whereDate('attendance_date', '2026-10-08')
+                ->update(['status' => CateringAttendanceStatus::Sakit->value]);
+        }
+    }
+
+    $start = CarbonImmutable::create(2026, 10, 1)->startOfMonth();
+    $end = $start->endOfMonth();
+    $service = app(CateringInvoiceService::class);
+    $weekends = array_values(array_filter(
+        range(1, $start->daysInMonth),
+        fn (int $day): bool => $start->setDay($day)->isWeekend(),
+    ));
+    $report = [];
+    $persisted = CateringAttendance::query()->count();
+    $printedWeekends = 0;
+
+    foreach ($members as $member) {
+        $invoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
+        $filename = $service->individualPdfFilename($invoice);
+        $bytes = $service->renderPdf($invoice);
+        file_put_contents($outputDir.'/'.$filename, $bytes);
+
+        $dates = array_column($invoice['attendanceRows'], 'date');
+        $printedWeekends += count(array_filter(
+            $weekends,
+            fn (int $day): bool => in_array($start->setDay($day)->format('d/m/Y'), $dates, true),
+        ));
+
+        $report[] = sprintf(
+            'PDF  %-52s %8d B  rows=%d  %s x %s = %s  libur recap=%d  saved rows=%d',
+            $filename,
+            strlen($bytes),
+            count($invoice['attendanceRows']),
+            $invoice['quantity'],
+            $invoice['pricePerDayFormatted'],
+            $invoice['totalFormatted'],
+            $invoice['countLibur'],
+            $invoice['savedDays'],
+        );
+    }
+
+    $classInvoice = $service->buildClassInvoice($schoolClass, $start, $end);
+    $classFilename = $service->classPdfFilename($classInvoice);
+    $classBytes = $service->renderClassPdf($classInvoice);
+    file_put_contents($outputDir.'/'.$classFilename, $classBytes);
+
+    $bulk = $service->buildBulkInvoices(CateringParticipantGroup::Student, $schoolClass, $start, $end);
+    $zipResponse = $service->bulkZipResponse($bulk, $schoolClass->name, $start);
+    ob_start();
+    $zipResponse->sendContent();
+    $zipBytes = ob_get_clean();
+    $zipName = $service->bulkZipFilename($schoolClass->name, $start);
+    file_put_contents($outputDir.'/'.$zipName, $zipBytes);
+
+    $bulkWeekendRows = 0;
+    $zipReport = [];
+
+    foreach ($bulk as $bulkInvoice) {
+        $bulkWeekendRows += count(array_filter(
+            array_column($bulkInvoice['attendanceRows'], 'date'),
+            fn (string $date): bool => in_array($date, array_map(
+                fn (int $day): string => $start->setDay($day)->format('d/m/Y'),
+                $weekends,
+            ), true),
+        ));
+    }
+
+    $archive = new ZipArchive;
+    $archive->open($outputDir.'/'.$zipName);
+
+    for ($index = 0; $index < $archive->numFiles; $index++) {
+        $zipReport[] = sprintf('   entry %-48s %8d B', $archive->getNameIndex($index), $archive->statIndex($index)['size']);
+    }
+
+    $archive->close();
+    $report[] = sprintf('ZIP  %-52s %8d B  entries=%d', $zipName, strlen($zipBytes), count($zipReport));
+    $report = array_merge($report, $zipReport);
+    $report[] = sprintf(
+        'PDF  %-52s %8d B  ikut=%d  libur=%d  %s',
+        $classFilename,
+        strlen($classBytes),
+        $classInvoice['totalIkut'],
+        $classInvoice['totalLibur'],
+        $classInvoice['grandTotalFormatted'],
+    );
+    $report[] = 'october weekends absent from the individual pdfs: '.($printedWeekends === 0 ? 'YES' : 'NO');
+    $report[] = 'october weekend rows inside the class zip: '.$bulkWeekendRows;
+    $report[] = 'attendance rows in database: '.CateringAttendance::query()->count().' of '.$persisted;
+    $report[] = 'artifacts in: '.$outputDir;
+
+    fwrite(STDERR, "\n".implode("\n", $report)."\n");
+
+    expect($printedWeekends)->toBe(0)
+        ->and($bulkWeekendRows)->toBe(0)
+        ->and(CateringAttendance::query()->count())->toBe($persisted)
+        ->and($classInvoice['totalLibur'])->toBe(2);
 });

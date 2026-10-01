@@ -363,19 +363,21 @@
 
 <table class="summary-grid">
     <tr>
-        <th style="width: 9%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
-        <th style="width: 9%;">{{ CateringAttendanceStatus::Sakit->label() }}</th>
-        <th style="width: 9%;">{{ CateringAttendanceStatus::Izin->label() }}</th>
-        <th style="width: 9%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
-        <th style="width: 9%;">{{ CateringAttendanceStatus::Libur->label() }}</th>
-        <th style="width: 19%;">Harga / Porsi</th>
-        <th class="total-head" style="width: 36%;">Total Tagihan</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::Sakit->label() }}</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::Izin->label() }}</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
+        <th style="width: 8%;">{{ CateringAttendanceStatus::Libur->label() }}</th>
+        <th style="width: 18%;">Harga / Porsi</th>
+        <th class="total-head" style="width: 34%;">Total Tagihan</th>
     </tr>
     <tr>
         <td>{{ $countIkut }}</td>
         <td>{{ $countSakit }}</td>
         <td>{{ $countIzin }}</td>
         <td>{{ $countAlfa }}</td>
+        <td>{{ $countTidakIkut }}</td>
         <td>{{ $countLibur }}</td>
         <td class="price">{{ $pricePerDayFormatted }}</td>
         <td class="total-cell">{{ $quantity }} hari &middot; {{ $totalFormatted }}</td>
@@ -385,8 +387,9 @@
 <div class="notes">
     <ul>
         <li>Hanya status <strong>{{ CateringAttendanceStatus::Ikut->label() }}</strong> yang dihitung.</li>
-        <li>{{ CateringAttendanceStatus::Sakit->label() }}, {{ CateringAttendanceStatus::Izin->label() }}, {{ CateringAttendanceStatus::Alfa->label() }}, dan {{ CateringAttendanceStatus::Libur->label() }} tidak ditagihkan.</li>
+        <li>{{ CateringAttendanceStatus::Sakit->label() }}, {{ CateringAttendanceStatus::Izin->label() }}, {{ CateringAttendanceStatus::Alfa->label() }}, {{ CateringAttendanceStatus::TidakIkut->label() }}, dan {{ CateringAttendanceStatus::Libur->label() }} tidak ditagihkan.</li>
         <li>Dihitung dari data absensi catering yang telah disimpan untuk periode {{ $periodLabel }}.</li>
+        <li>Rincian hanya menampilkan hari kerja Senin sampai Jumat; hari Sabtu dan Minggu tidak ditampilkan.</li>
     </ul>
 </div>
 

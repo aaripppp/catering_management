@@ -8,6 +8,7 @@ enum CateringAttendanceStatus: string
     case Sakit = 'sakit';
     case Izin = 'izin';
     case Alfa = 'alfa';
+    case TidakIkut = 'tidak_ikut';
     case Libur = 'libur';
 
     public function label(): string
@@ -17,6 +18,7 @@ enum CateringAttendanceStatus: string
             self::Sakit => 'Sakit',
             self::Izin => 'Izin',
             self::Alfa => 'Alfa',
+            self::TidakIkut => 'Tidak Ikut',
             self::Libur => 'Libur',
         };
     }
@@ -28,6 +30,7 @@ enum CateringAttendanceStatus: string
             self::Sakit => 'S',
             self::Izin => 'I',
             self::Alfa => 'A',
+            self::TidakIkut => 'T',
             self::Libur => 'L',
         };
     }

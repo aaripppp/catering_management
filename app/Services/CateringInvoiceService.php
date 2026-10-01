@@ -102,7 +102,7 @@ class CateringInvoiceService
 
         foreach ($members as $member) {
             $memberRows = $rowsByMember[$member->id] ?? [];
-            $counts = $this->statusCounts($memberRows);
+            $counts = $this->statusCounts($this->invoiceVisibleRows($memberRows));
             $pricePerDay = (int) ($member->cateringCategory?->price_per_day ?? 0);
             $total = $counts[self::BILLABLE_STATUS->value] * $pricePerDay;
 
@@ -120,6 +120,7 @@ class CateringInvoiceService
                 'sakit' => $counts[CateringAttendanceStatus::Sakit->value],
                 'izin' => $counts[CateringAttendanceStatus::Izin->value],
                 'alfa' => $counts[CateringAttendanceStatus::Alfa->value],
+                'tidakIkut' => $counts[CateringAttendanceStatus::TidakIkut->value],
                 'libur' => $counts[CateringAttendanceStatus::Libur->value],
                 'savedDays' => count($memberRows),
                 'pricePerDay' => $pricePerDay,
@@ -148,6 +149,7 @@ class CateringInvoiceService
             'totalSakit' => $totals[CateringAttendanceStatus::Sakit->value],
             'totalIzin' => $totals[CateringAttendanceStatus::Izin->value],
             'totalAlfa' => $totals[CateringAttendanceStatus::Alfa->value],
+            'totalTidakIkut' => $totals[CateringAttendanceStatus::TidakIkut->value],
             'totalLibur' => $totals[CateringAttendanceStatus::Libur->value],
             'logoDataUri' => $this->logoDataUri(),
         ];
@@ -413,6 +415,10 @@ class CateringInvoiceService
     /**
      * Assemble the invoice payload shared by individual and bulk rendering.
      *
+     * `savedDays` keeps counting every persisted row of the period, while the
+     * printed detail and the status recap only cover the days the invoice
+     * actually reports.
+     *
      * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
      * @return array<string, mixed>
      */
@@ -427,7 +433,8 @@ class CateringInvoiceService
             : $member->cateringCategory()->first();
 
         $pricePerDay = (int) ($category?->price_per_day ?? 0);
-        $counts = $this->statusCounts($rows);
+        $visibleRows = $this->invoiceVisibleRows($rows);
+        $counts = $this->statusCounts($visibleRows);
         $quantity = $counts[self::BILLABLE_STATUS->value];
         $group = $category?->participant_group ?? CateringParticipantGroup::Student;
         $usesClass = $group->requiresClassSelection();
@@ -462,14 +469,36 @@ class CateringInvoiceService
             'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
             'total' => $total,
             'totalFormatted' => $this->formatRupiah($total),
-            'attendanceRows' => $this->detailRows($rows, $pricePerDay),
+            'attendanceRows' => $this->detailRows($visibleRows, $pricePerDay),
             'countIkut' => $counts[self::BILLABLE_STATUS->value],
             'countSakit' => $counts[CateringAttendanceStatus::Sakit->value],
             'countIzin' => $counts[CateringAttendanceStatus::Izin->value],
             'countAlfa' => $counts[CateringAttendanceStatus::Alfa->value],
+            'countTidakIkut' => $counts[CateringAttendanceStatus::TidakIkut->value],
             'countLibur' => $counts[CateringAttendanceStatus::Libur->value],
             'logoDataUri' => $this->logoDataUri(),
         ];
+    }
+
+    /**
+     * Keep only the attendance days an invoice is allowed to present.
+     *
+     * Catering attendance is stored for the whole month, and the initializer
+     * marks Saturday and Sunday as "libur". Those weekend rows stay in the
+     * database, but an invoice only reports working days, so they never reach
+     * the detail table or the status recap. The filter looks at the day of the
+     * week, never at the status, so a weekday an administrator marked "libur"
+     * by hand is still printed.
+     *
+     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
+     * @return array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>
+     */
+    private function invoiceVisibleRows(array $rows): array
+    {
+        return array_values(array_filter(
+            $rows,
+            fn (array $row): bool => ! CarbonImmutable::parse($row['dateIso'])->isWeekend(),
+        ));
     }
 
     /**

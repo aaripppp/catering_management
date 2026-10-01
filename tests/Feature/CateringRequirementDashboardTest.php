@@ -160,6 +160,18 @@ it('excludes alfa from the portion total', function () {
     expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0);
 });
 
+it('excludes tidak ikut from the portion total and counts it separately', function () {
+    $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
+
+    saveAttendance(recapStudent('Siswa Tidak Ikut', $class), RECAP_DATE, CateringAttendanceStatus::TidakIkut);
+
+    $recap = recapFor(RECAP_DATE);
+
+    expect($recap['totalPortions'])->toBe(0)
+        ->and($recap['tidakIkutRows'])->toBe(1)
+        ->and($recap['liburRows'])->toBe(0);
+});
+
 it('excludes libur from the portion total', function () {
     $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
 
@@ -616,6 +628,16 @@ it('reports a zero portion day as libur context when every status is libur', fun
     recapOn(RECAP_DATE)
         ->assertSee('Data Tersimpan')
         ->assertSee('0 Porsi · Libur / tidak ada catering');
+});
+
+it('reports tidak ikut separately on a zero portion dashboard day', function () {
+    $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
+    saveAttendance(recapStudent('Siswa', $class), RECAP_DATE, CateringAttendanceStatus::TidakIkut);
+
+    recapOn(RECAP_DATE)
+        ->assertSee('0 Porsi · Tidak ada peserta yang ikut')
+        ->assertSee('1 baris Tidak Ikut')
+        ->assertDontSee('0 Porsi · Libur / tidak ada catering');
 });
 
 it('initialises switched dashboard dates without overwriting saved statuses', function () {

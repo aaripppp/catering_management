@@ -129,6 +129,7 @@ it('never overwrites a status that is already stored', function (CateringAttenda
     'sakit' => [CateringAttendanceStatus::Sakit],
     'izin' => [CateringAttendanceStatus::Izin],
     'alfa' => [CateringAttendanceStatus::Alfa],
+    'tidak ikut' => [CateringAttendanceStatus::TidakIkut],
     'libur' => [CateringAttendanceStatus::Libur],
 ]);
 
@@ -289,6 +290,23 @@ it('persists a single cell change immediately', function () {
         ->assertHasNoErrors();
 
     expect(storedStatus($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Sakit);
+});
+
+it('auto saves tidak ikut immediately and keeps it after reload', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+    $user = User::factory()->admin()->create();
+
+    autoSaveMatrix($schoolClass, $user)
+        ->call('setCellStatus', $member->id, '2026-09-01', 'tidak_ikut')
+        ->assertSet('saveState.saved', true)
+        ->assertHasNoErrors();
+
+    expect(storedStatus($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::TidakIkut)
+        ->and(CateringAttendance::query()->where('catering_member_id', $member->id)->count())->toBe(30);
+
+    autoSaveMatrix($schoolClass, $user)
+        ->assertSet("attendance.{$member->id}.2026-09-01", 'tidak_ikut');
 });
 
 it('does not need a manual save step to persist a cell', function () {

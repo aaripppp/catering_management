@@ -10,18 +10,20 @@
         $statusLabels = collect($statusOptions)->mapWithKeys(fn ($status) => [$status->value => $status->label()]);
         $statusSymbols = collect($statusOptions)->mapWithKeys(fn ($status) => [$status->value => $status->shorthand()]);
         $statusClasses = [
-            'ikut' => 'border-emerald-600 bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
-            'sakit' => 'border-amber-600 bg-amber-100 text-amber-800 hover:bg-amber-200',
-            'izin' => 'border-blue-600 bg-blue-100 text-blue-800 hover:bg-blue-200',
-            'alfa' => 'border-red-600 bg-red-100 text-red-800 hover:bg-red-200',
-            'libur' => 'border-slate-600 bg-slate-200 text-slate-800 hover:bg-slate-300',
+            'ikut' => 'border-emerald-700 bg-emerald-500 text-white hover:bg-emerald-600 focus-visible:ring-emerald-300',
+            'sakit' => 'border-amber-600 bg-amber-400 text-amber-950 hover:bg-amber-500 focus-visible:ring-amber-300',
+            'izin' => 'border-blue-700 bg-blue-500 text-white hover:bg-blue-600 focus-visible:ring-blue-300',
+            'alfa' => 'border-red-700 bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-300',
+            'tidak_ikut' => 'border-violet-800 bg-violet-600 text-white hover:bg-violet-700 focus-visible:ring-violet-300',
+            'libur' => 'border-slate-800 bg-slate-600 text-white hover:bg-slate-700 focus-visible:ring-slate-300',
         ];
         $statusSelectedClasses = [
-            'ikut' => 'ring-2 ring-emerald-600 ring-offset-2',
-            'sakit' => 'ring-2 ring-amber-600 ring-offset-2',
-            'izin' => 'ring-2 ring-blue-600 ring-offset-2',
-            'alfa' => 'ring-2 ring-red-600 ring-offset-2',
-            'libur' => 'ring-2 ring-slate-600 ring-offset-2',
+            'ikut' => 'scale-[1.03] shadow-md ring-4 ring-emerald-300 ring-offset-2',
+            'sakit' => 'scale-[1.03] shadow-md ring-4 ring-amber-300 ring-offset-2',
+            'izin' => 'scale-[1.03] shadow-md ring-4 ring-blue-300 ring-offset-2',
+            'alfa' => 'scale-[1.03] shadow-md ring-4 ring-red-300 ring-offset-2',
+            'tidak_ikut' => 'scale-[1.03] shadow-md ring-4 ring-violet-300 ring-offset-2',
+            'libur' => 'scale-[1.03] shadow-md ring-4 ring-slate-300 ring-offset-2',
         ];
         $selectedClass = collect($classOptions)->firstWhere('id', (int) $schoolClassId);
         $selectedGroupLabel = $participantGroupOptions[$participantGroup] ?? 'Kelompok peserta';
@@ -131,13 +133,14 @@
             </div>
         </section>
     @else
-        <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             @foreach ([
                 ['label' => 'Jumlah Peserta', 'value' => $summary['participants'], 'class' => 'text-slate-900'],
                 ['label' => 'Ikut', 'value' => $summary['ikut'], 'class' => 'text-emerald-700'],
                 ['label' => 'Sakit', 'value' => $summary['sakit'], 'class' => 'text-amber-700'],
                 ['label' => 'Izin', 'value' => $summary['izin'], 'class' => 'text-blue-700'],
                 ['label' => 'Alfa', 'value' => $summary['alfa'], 'class' => 'text-red-700'],
+                ['label' => 'Tidak Ikut', 'value' => $summary['tidak_ikut'], 'class' => 'text-violet-800'],
             ] as $item)
                 <div class="card px-4 py-3">
                     <p class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ $item['label'] }}</p>
@@ -299,7 +302,7 @@
                                             <button
                                                 type="button"
                                                 wire:click="openStatusMenu({{ $participant['id'] }}, '{{ $date['date'] }}')"
-                                                class="inline-flex h-8 w-8 items-center justify-center rounded-md border text-xs font-bold transition {{ $statusClasses[$status] ?? 'border-red-300 bg-red-50 text-red-700' }}"
+                                                class="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 text-xs font-bold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 {{ $statusClasses[$status] ?? 'border-red-700 bg-red-500 text-white' }}"
                                                 title="{{ $participant['name'] }} - {{ $date['date'] }}: {{ $statusLabels[$status] ?? 'Status tidak valid' }}"
                                                 aria-label="Ubah status {{ $participant['name'] }} tanggal {{ $date['day'] }} dari {{ $statusLabels[$status] ?? 'status tidak valid' }}"
                                             >
@@ -359,13 +362,13 @@
                     </button>
                 </div>
 
-                <div class="mt-4 grid grid-cols-5 gap-2">
+                <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     @foreach ($statusOptions as $status)
                         <button
                             type="button"
                             wire:click="setCellStatus({{ $editingMemberId }}, '{{ $editingDate }}', '{{ $status->value }}')"
                             @class([
-                                'flex flex-col items-center gap-1 rounded-lg border px-2 py-3 text-xs font-semibold transition',
+                                'flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2',
                                 $statusClasses[$status->value],
                                 $statusSelectedClasses[$status->value] => $editingStatus === $status->value,
                             ])
