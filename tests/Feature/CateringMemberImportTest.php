@@ -1,8 +1,10 @@
 <?php
 
+use App\Enums\CateringParticipantGroup;
 use App\Enums\Gender;
 use App\Livewire\CateringMemberImport;
 use App\Models\CateringCategory;
+use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
 use App\Models\SchoolClass;
 use App\Models\User;
@@ -53,12 +55,20 @@ beforeEach(function () {
         'name' => 'VII A',
         'level' => '7',
     ]);
-    $this->defaultCategory = CateringCategory::factory()->create([
+    $this->defaultCategory = CateringCategory::factory()->student()->create([
         'name' => 'Siswa Umum',
         'price_per_day' => 17000,
     ]);
-    $this->customCategory = CateringCategory::factory()->create([
+    $this->customCategory = CateringCategory::factory()->student()->create([
         'name' => 'Anak Guru',
+        'price_per_day' => 15000,
+    ]);
+    $this->guruCategory = CateringCategory::factory()->employee()->create([
+        'name' => 'Guru',
+        'price_per_day' => 20000,
+    ]);
+    $this->tuCategory = CateringCategory::factory()->employee()->create([
+        'name' => 'TU',
         'price_per_day' => 15000,
     ]);
 });
@@ -113,6 +123,8 @@ it('generates all required template sheets and references', function () {
     }
 
     $classNames = collect($sheets['REFERENSI KELAS'])->skip(1)->pluck(2)->values()->all();
+    $categoryRows = collect($sheets['REFERENSI KATEGORI']);
+    $guideText = collect($sheets['PANDUAN'])->flatten()->implode(' ');
 
     expect(array_keys($sheets))->toBe([
         'DATA PESERTA',
@@ -129,7 +141,14 @@ it('generates all required template sheets and references', function () {
             '12A-IPS',
             '12B-IPS',
         ])
-        ->and(collect($sheets['REFERENSI KATEGORI'])->pluck(0))->toContain('Siswa Umum');
+        ->and($categoryRows->first())->toBe(['Nama Kategori', 'Kelompok', 'Harga / Hari', 'Status'])
+        ->and($categoryRows->contains(fn (array $row): bool => $row[0] === 'Siswa Umum' && $row[1] === 'Siswa'))->toBeTrue()
+        ->and($categoryRows->contains(fn (array $row): bool => $row[0] === 'Guru' && $row[1] === 'Pegawai'))->toBeTrue()
+        ->and($categoryRows->contains(fn (array $row): bool => $row[0] === 'TU' && $row[1] === 'Pegawai'))->toBeTrue()
+        ->and($guideText)->toContain('Kelas wajib untuk kategori kelompok Siswa')
+        ->and($guideText)->toContain('boleh kosong untuk kategori kelompok Pegawai')
+        ->and($guideText)->toContain('Ahmad Fauzan 7A Siswa Umum')
+        ->and($guideText)->toContain('Ustadz Hasan [kosong] Guru');
 });
 
 it('reads a valid workbook and ignores completely empty rows', function () {
@@ -162,14 +181,14 @@ it('rejects a workbook with invalid headers', function () {
     }
 });
 
-it('requires Nama and Kelas', function () {
+it('requires Nama and Kelas for a student category', function () {
     $preview = app(CateringMemberImportService::class)->preview([
         cateringMemberImportRow(['name' => '', 'class_name' => '']),
     ]);
 
     expect($preview['has_errors'])->toBeTrue()
         ->and($preview['rows'][0]['errors'])->toContain('Nama wajib diisi.')
-        ->and($preview['rows'][0]['errors'])->toContain('Kelas wajib diisi.');
+        ->and($preview['rows'][0]['errors'])->toContain('Kelas wajib diisi untuk kategori peserta siswa.');
 });
 
 it('allows blank category and resolves it to Siswa Umum', function () {
@@ -180,6 +199,15 @@ it('allows blank category and resolves it to Siswa Umum', function () {
     expect($preview['has_errors'])->toBeFalse()
         ->and($preview['rows'][0]['catering_category_id'])->toBe($this->defaultCategory->id)
         ->and($preview['rows'][0]['resolved_category_name'])->toBe('Siswa Umum');
+});
+
+it('rejects blank class when blank category resolves to the student default', function () {
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow(['class_name' => '', 'category_name' => '']),
+    ]);
+
+    expect($preview['has_errors'])->toBeTrue()
+        ->and($preview['rows'][0]['errors'])->toContain('Kelas wajib diisi untuk kategori peserta siswa.');
 });
 
 it('resolves custom category by name', function () {
@@ -198,7 +226,7 @@ it('blocks missing class without creating it', function () {
     ]);
 
     expect($preview['has_errors'])->toBeTrue()
-        ->and($preview['rows'][0]['status_label'])->toContain('Kelas "VII Z" tidak ditemukan.')
+        ->and($preview['rows'][0]['errors'])->toContain('Kelas tidak ditemukan.')
         ->and(SchoolClass::query()->count())->toBe($classCount);
 });
 
@@ -209,7 +237,7 @@ it('blocks missing category without creating it', function () {
     ]);
 
     expect($preview['has_errors'])->toBeTrue()
-        ->and($preview['rows'][0]['status_label'])->toContain('Kategori "Kategori ABC" tidak ditemukan.')
+        ->and($preview['rows'][0]['errors'])->toContain('Kategori tidak ditemukan.')
         ->and(CateringCategory::query()->count())->toBe($categoryCount);
 });
 
@@ -221,7 +249,64 @@ it('blocks a blank category when Siswa Umum is missing', function () {
     ]);
 
     expect($preview['has_errors'])->toBeTrue()
-        ->and($preview['rows'][0]['status_label'])->toContain('Kategori default "Siswa Umum" tidak ditemukan.');
+        ->and($preview['rows'][0]['errors'])->toContain('Kategori default Siswa Umum tidak ditemukan.');
+});
+
+it('imports employee categories without a class', function (string $categoryName) {
+    $result = app(CateringMemberImportService::class)->import([
+        cateringMemberImportRow([
+            'name' => 'Ustadz '.$categoryName,
+            'class_name' => '',
+            'category_name' => $categoryName,
+        ]),
+    ]);
+
+    $member = CateringMember::query()
+        ->with('cateringCategory')
+        ->where('name', 'Ustadz '.$categoryName)
+        ->sole();
+
+    expect($result['total'])->toBe(1)
+        ->and($member->school_class_id)->toBeNull()
+        ->and($member->cateringCategory->participant_group)->toBe(CateringParticipantGroup::Employee)
+        ->and(CateringEmployeeAssignment::query()->count())->toBe(0);
+})->with([
+    'Guru' => ['Guru'],
+    'TU' => ['TU'],
+]);
+
+it('uses participant group rather than category name for the class rule', function () {
+    $employeeCategory = CateringCategory::factory()->employee()->create(['name' => 'Relawan Sekolah']);
+    $studentCategory = CateringCategory::factory()->student()->create(['name' => 'Program Beasiswa']);
+
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow([
+            'name' => 'Pegawai Relawan',
+            'class_name' => '',
+            'category_name' => $employeeCategory->name,
+        ]),
+        cateringMemberImportRow([
+            'row_number' => 3,
+            'name' => 'Siswa Beasiswa',
+            'class_name' => '',
+            'category_name' => $studentCategory->name,
+        ]),
+    ]);
+
+    expect($preview['rows'][0]['status'])->toBe('ready')
+        ->and($preview['rows'][0]['participant_group'])->toBe(CateringParticipantGroup::Employee->value)
+        ->and($preview['rows'][1]['status'])->toBe('error')
+        ->and($preview['rows'][1]['errors'])->toContain('Kelas wajib diisi untuk kategori peserta siswa.');
+});
+
+it('rejects class input for an employee category without creating an assignment', function () {
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow(['category_name' => 'Guru']),
+    ]);
+
+    expect($preview['has_errors'])->toBeTrue()
+        ->and($preview['rows'][0]['errors'])->toContain('Kelas harus dikosongkan untuk kategori peserta pegawai.')
+        ->and(CateringEmployeeAssignment::query()->count())->toBe(0);
 });
 
 it('resolves class and category ignoring harmless case and spacing', function () {
@@ -276,6 +361,41 @@ it('blocks duplicate name and class already in the database', function () {
 
     expect($preview['has_errors'])->toBeTrue()
         ->and($preview['rows'][0]['status_label'])->toContain('sudah terdaftar');
+});
+
+it('blocks duplicate employee name within the same category', function () {
+    CateringMember::factory()->withoutClass()->create([
+        'name' => 'Ustadz Hasan',
+        'catering_category_id' => $this->guruCategory->id,
+    ]);
+
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow([
+            'name' => ' ustadz  hasan ',
+            'class_name' => '',
+            'category_name' => 'Guru',
+        ]),
+    ]);
+
+    expect($preview['has_errors'])->toBeTrue()
+        ->and($preview['rows'][0]['errors'])->toContain('Peserta dengan nama dan kategori yang sama sudah terdaftar.');
+});
+
+it('allows the same employee name in a different category', function () {
+    CateringMember::factory()->withoutClass()->create([
+        'name' => 'Ustadz Hasan',
+        'catering_category_id' => $this->guruCategory->id,
+    ]);
+
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow([
+            'name' => 'Ustadz Hasan',
+            'class_name' => '',
+            'category_name' => 'TU',
+        ]),
+    ]);
+
+    expect($preview['has_errors'])->toBeFalse();
 });
 
 it('does not write CateringMember records during preview', function () {
@@ -388,6 +508,41 @@ it('previews and imports a workbook through the Livewire flow', function () {
     }
 });
 
+it('previews and imports student and employee rows from one workbook', function () {
+    $path = cateringMemberImportWorkbook([
+        ['Ahmad Fauzan', 'VII A', 'Siswa Umum', 'L', '', '', '', ''],
+        ['Ustadz Hasan', '', 'Guru', 'L', '', '', '081234567890', ''],
+    ]);
+    $upload = UploadedFile::fake()->createWithContent('peserta-catering.xlsx', file_get_contents($path));
+
+    try {
+        $component = Livewire::actingAs($this->admin)
+            ->test(CateringMemberImport::class)
+            ->set('file', $upload)
+            ->call('previewImport')
+            ->assertHasNoErrors()
+            ->assertSet('step', 2)
+            ->assertSee('Ahmad Fauzan')
+            ->assertSee('Ustadz Hasan')
+            ->assertSee('Semua data valid');
+
+        expect(CateringMember::query()->count())->toBe(0);
+
+        $component->call('confirmImport')->assertHasNoErrors();
+
+        $student = CateringMember::query()->with('cateringCategory')->where('name', 'Ahmad Fauzan')->sole();
+        $employee = CateringMember::query()->with('cateringCategory')->where('name', 'Ustadz Hasan')->sole();
+
+        expect($student->school_class_id)->toBe($this->schoolClass->id)
+            ->and($student->cateringCategory->participant_group)->toBe(CateringParticipantGroup::Student)
+            ->and($employee->school_class_id)->toBeNull()
+            ->and($employee->cateringCategory->participant_group)->toBe(CateringParticipantGroup::Employee)
+            ->and(CateringEmployeeAssignment::query()->count())->toBe(0);
+    } finally {
+        @unlink($path);
+    }
+});
+
 it('shows blocking row errors through the Livewire preview', function () {
     $path = cateringMemberImportWorkbook([
         ['Test Error', 'DOES NOT EXIST', '', '', '', '', '', ''],
@@ -401,7 +556,7 @@ it('shows blocking row errors through the Livewire preview', function () {
             ->call('previewImport')
             ->assertSet('step', 2)
             ->assertSee('Perbaiki file sebelum import')
-            ->assertSee('Kelas &quot;DOES NOT EXIST&quot; tidak ditemukan.', false)
+            ->assertSee('Kelas tidak ditemukan.')
             ->call('confirmImport')
             ->assertHasErrors(['import']);
     } finally {

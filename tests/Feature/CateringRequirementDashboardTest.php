@@ -183,6 +183,18 @@ it('excludes libur from the portion total', function () {
         ->and($recap['liburRows'])->toBe(1);
 });
 
+it('excludes the new non-billable statuses from the portion total', function (CateringAttendanceStatus $status) {
+    $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
+
+    saveAttendance(recapStudent('Siswa Non-Billable', $class), RECAP_DATE, $status);
+
+    expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0);
+})->with([
+    'ujian' => CateringAttendanceStatus::Ujian,
+    'event unit' => CateringAttendanceStatus::EventUnit,
+    'puasa' => CateringAttendanceStatus::Puasa,
+]);
+
 it('does not make the recap service infer attendance that was not persisted', function () {
     $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
     recapStudent('Belum Absen', $class);

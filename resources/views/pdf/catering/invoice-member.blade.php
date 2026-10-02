@@ -332,11 +332,10 @@
     <thead>
         <tr>
             <th class="num" style="width: 5%;">No</th>
-            <th class="nowrap" style="width: 13%;">Tanggal</th>
-            <th style="width: 12%;">Status</th>
-            <th style="width: 20%;">Keterangan</th>
-            <th class="right nowrap" style="width: 25%;">Harga / Porsi</th>
-            <th class="right nowrap" style="width: 25%;">Subtotal</th>
+            <th class="nowrap" style="width: 17%;">Tanggal</th>
+            <th style="width: 18%;">Status</th>
+            <th class="right nowrap" style="width: 30%;">Harga / Porsi</th>
+            <th class="right nowrap" style="width: 30%;">Subtotal</th>
         </tr>
     </thead>
     <tbody>
@@ -347,13 +346,12 @@
                 <td>
                     <span class="status-pill {{ $row['isBillable'] ? 'status-billed' : 'status-free' }}">{{ $row['status'] }}</span>
                 </td>
-                <td class="{{ $row['isBillable'] ? 'billable' : 'not-billable' }}">{{ $row['note'] }}</td>
                 <td class="right nowrap">{{ $row['pricePerDayFormatted'] }}</td>
                 <td class="right nowrap">{{ $row['subtotalFormatted'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="6" class="num not-billable">Belum ada absensi tersimpan untuk periode ini.</td>
+                <td colspan="5" class="num not-billable">Belum ada absensi tersimpan untuk periode ini.</td>
             </tr>
         @endforelse
     </tbody>
@@ -363,14 +361,16 @@
 
 <table class="summary-grid">
     <tr>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::Sakit->label() }}</th>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::Izin->label() }}</th>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
-        <th style="width: 8%;">{{ CateringAttendanceStatus::Libur->label() }}</th>
-        <th style="width: 18%;">Harga / Porsi</th>
-        <th class="total-head" style="width: 34%;">Total Tagihan</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Sakit->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Izin->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Ujian->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::EventUnit->label() }}</th>
+        <th style="width: 6%;">{{ CateringAttendanceStatus::Puasa->label() }}</th>
+        <th style="width: 20%;">Harga / Porsi</th>
+        <th class="total-head" style="width: 32%;">Total Tagihan</th>
     </tr>
     <tr>
         <td>{{ $countIkut }}</td>
@@ -378,7 +378,9 @@
         <td>{{ $countIzin }}</td>
         <td>{{ $countAlfa }}</td>
         <td>{{ $countTidakIkut }}</td>
-        <td>{{ $countLibur }}</td>
+        <td>{{ $countUjian }}</td>
+        <td>{{ $countEventUnit }}</td>
+        <td>{{ $countPuasa }}</td>
         <td class="price">{{ $pricePerDayFormatted }}</td>
         <td class="total-cell">{{ $quantity }} hari &middot; {{ $totalFormatted }}</td>
     </tr>
@@ -387,9 +389,9 @@
 <div class="notes">
     <ul>
         <li>Hanya status <strong>{{ CateringAttendanceStatus::Ikut->label() }}</strong> yang dihitung.</li>
-        <li>{{ CateringAttendanceStatus::Sakit->label() }}, {{ CateringAttendanceStatus::Izin->label() }}, {{ CateringAttendanceStatus::Alfa->label() }}, {{ CateringAttendanceStatus::TidakIkut->label() }}, dan {{ CateringAttendanceStatus::Libur->label() }} tidak ditagihkan.</li>
+        <li>{{ CateringAttendanceStatus::Sakit->label() }}, {{ CateringAttendanceStatus::Izin->label() }}, {{ CateringAttendanceStatus::Alfa->label() }}, {{ CateringAttendanceStatus::TidakIkut->label() }}, {{ CateringAttendanceStatus::Ujian->label() }}, {{ CateringAttendanceStatus::EventUnit->label() }}, dan {{ CateringAttendanceStatus::Puasa->label() }} tidak ditagihkan.</li>
         <li>Dihitung dari data absensi catering yang telah disimpan untuk periode {{ $periodLabel }}.</li>
-        <li>Rincian hanya menampilkan hari kerja Senin sampai Jumat; hari Sabtu dan Minggu tidak ditampilkan.</li>
+        <li>Baris berstatus {{ CateringAttendanceStatus::Libur->label() }} tidak ditampilkan; status lain tetap ditampilkan tanpa membedakan hari.</li>
     </ul>
 </div>
 

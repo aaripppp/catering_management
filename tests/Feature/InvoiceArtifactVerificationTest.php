@@ -10,6 +10,40 @@ use App\Services\CateringAttendanceInitializerService;
 use App\Services\CateringInvoiceService;
 use Carbon\CarbonImmutable;
 
+function artifactPdfText(string $bytes): string
+{
+    $text = '';
+
+    if (preg_match_all('/stream\\r?\\n(.*?)endstream/s', $bytes, $matches) === false) {
+        return $text;
+    }
+
+    foreach ($matches[1] as $stream) {
+        $decoded = @gzuncompress($stream);
+
+        if ($decoded === false || ! str_contains($decoded, 'Tf')) {
+            continue;
+        }
+
+        if (preg_match_all('/\[(.*?)\]\\s*TJ|\((.*?)\)\\s*Tj/s', $decoded, $runs, PREG_SET_ORDER) === false) {
+            continue;
+        }
+
+        foreach ($runs as $run) {
+            $text .= $run[2] ?? '';
+
+            if (isset($run[1]) && $run[1] !== '') {
+                preg_match_all('/\((.*?)\)/s', $run[1], $fragments);
+                $text .= implode('', $fragments[1]);
+            }
+
+            $text .= ' ';
+        }
+    }
+
+    return trim((string) preg_replace('/\s+/', ' ', $text));
+}
+
 it('produces real pdf and zip artifacts for review', function () {
     $outputDir = sys_get_temp_dir().'/cattering-invoice-verification';
 
@@ -104,7 +138,7 @@ it('fails loudly instead of writing a broken archive when no invoice qualifies',
         ->toThrow(RuntimeException::class, 'tidak ada invoice yang dihasilkan');
 });
 
-it('writes a reviewable october sample whose weekends are absent from the pdf', function () {
+it('writes reviewable direct and zip pdfs using libur-only visibility', function () {
     $outputDir = sys_get_temp_dir().'/cattering-invoice-verification';
 
     if (! is_dir($outputDir)) {
@@ -127,6 +161,11 @@ it('writes a reviewable october sample whose weekends are absent from the pdf', 
             ->whereDate('attendance_date', '2026-10-09')
             ->update(['status' => CateringAttendanceStatus::Libur->value]);
 
+        CateringAttendance::query()
+            ->where('catering_member_id', $member->id)
+            ->whereDate('attendance_date', '2026-10-03')
+            ->update(['status' => CateringAttendanceStatus::Ujian->value]);
+
         if ($index === 1) {
             CateringAttendance::query()
                 ->where('catering_member_id', $member->id)
@@ -145,12 +184,17 @@ it('writes a reviewable october sample whose weekends are absent from the pdf', 
     $report = [];
     $persisted = CateringAttendance::query()->count();
     $printedWeekends = 0;
+    $directUjianRows = 0;
+    $directLiburRows = 0;
 
     foreach ($members as $member) {
         $invoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
         $filename = $service->individualPdfFilename($invoice);
         $bytes = $service->renderPdf($invoice);
         file_put_contents($outputDir.'/'.$filename, $bytes);
+        $text = artifactPdfText($bytes);
+        $directUjianRows += str_contains($text, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
+        $directLiburRows += str_contains($text, '09/10/2026 Libur') ? 1 : 0;
 
         $dates = array_column($invoice['attendanceRows'], 'date');
         $printedWeekends += count(array_filter(
@@ -199,9 +243,16 @@ it('writes a reviewable october sample whose weekends are absent from the pdf', 
 
     $archive = new ZipArchive;
     $archive->open($outputDir.'/'.$zipName);
+    $zipUjianRows = 0;
+    $zipLiburRows = 0;
 
     for ($index = 0; $index < $archive->numFiles; $index++) {
-        $zipReport[] = sprintf('   entry %-48s %8d B', $archive->getNameIndex($index), $archive->statIndex($index)['size']);
+        $entryName = $archive->getNameIndex($index);
+        $entryBytes = $archive->getFromIndex($index);
+        $entryText = $entryBytes === false ? '' : artifactPdfText($entryBytes);
+        $zipUjianRows += str_contains($entryText, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
+        $zipLiburRows += str_contains($entryText, '09/10/2026 Libur') ? 1 : 0;
+        $zipReport[] = sprintf('   entry %-48s %8d B', $entryName, $archive->statIndex($index)['size']);
     }
 
     $archive->close();
@@ -215,15 +266,20 @@ it('writes a reviewable october sample whose weekends are absent from the pdf', 
         $classInvoice['totalLibur'],
         $classInvoice['grandTotalFormatted'],
     );
-    $report[] = 'october weekends absent from the individual pdfs: '.($printedWeekends === 0 ? 'YES' : 'NO');
+    $report[] = 'visible weekend rows in individual pdfs: '.$printedWeekends;
     $report[] = 'october weekend rows inside the class zip: '.$bulkWeekendRows;
     $report[] = 'attendance rows in database: '.CateringAttendance::query()->count().' of '.$persisted;
     $report[] = 'artifacts in: '.$outputDir;
 
     fwrite(STDERR, "\n".implode("\n", $report)."\n");
 
-    expect($printedWeekends)->toBe(0)
-        ->and($bulkWeekendRows)->toBe(0)
+    expect($printedWeekends)->toBe(2)
+        ->and($bulkWeekendRows)->toBe(2)
+        ->and($directUjianRows)->toBe(2)
+        ->and($directLiburRows)->toBe(0)
+        ->and($zipUjianRows)->toBe(2)
+        ->and($zipLiburRows)->toBe(0)
         ->and(CateringAttendance::query()->count())->toBe($persisted)
-        ->and($classInvoice['totalLibur'])->toBe(2);
+        ->and($classInvoice['totalUjian'])->toBe(2)
+        ->and($classInvoice['totalLibur'])->toBe(0);
 });

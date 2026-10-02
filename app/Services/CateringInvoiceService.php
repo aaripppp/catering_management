@@ -26,10 +26,6 @@ class CateringInvoiceService
      */
     private const BILLABLE_STATUS = CateringAttendanceStatus::Ikut;
 
-    private const BILLABLE_NOTE = 'Dihitung';
-
-    private const NON_BILLABLE_NOTE = 'Tidak dihitung';
-
     private const LOGO_MAX_WIDTH = 160;
 
     /**
@@ -121,6 +117,9 @@ class CateringInvoiceService
                 'izin' => $counts[CateringAttendanceStatus::Izin->value],
                 'alfa' => $counts[CateringAttendanceStatus::Alfa->value],
                 'tidakIkut' => $counts[CateringAttendanceStatus::TidakIkut->value],
+                'ujian' => $counts[CateringAttendanceStatus::Ujian->value],
+                'eventUnit' => $counts[CateringAttendanceStatus::EventUnit->value],
+                'puasa' => $counts[CateringAttendanceStatus::Puasa->value],
                 'libur' => $counts[CateringAttendanceStatus::Libur->value],
                 'savedDays' => count($memberRows),
                 'pricePerDay' => $pricePerDay,
@@ -150,6 +149,9 @@ class CateringInvoiceService
             'totalIzin' => $totals[CateringAttendanceStatus::Izin->value],
             'totalAlfa' => $totals[CateringAttendanceStatus::Alfa->value],
             'totalTidakIkut' => $totals[CateringAttendanceStatus::TidakIkut->value],
+            'totalUjian' => $totals[CateringAttendanceStatus::Ujian->value],
+            'totalEventUnit' => $totals[CateringAttendanceStatus::EventUnit->value],
+            'totalPuasa' => $totals[CateringAttendanceStatus::Puasa->value],
             'totalLibur' => $totals[CateringAttendanceStatus::Libur->value],
             'logoDataUri' => $this->logoDataUri(),
         ];
@@ -475,6 +477,9 @@ class CateringInvoiceService
             'countIzin' => $counts[CateringAttendanceStatus::Izin->value],
             'countAlfa' => $counts[CateringAttendanceStatus::Alfa->value],
             'countTidakIkut' => $counts[CateringAttendanceStatus::TidakIkut->value],
+            'countUjian' => $counts[CateringAttendanceStatus::Ujian->value],
+            'countEventUnit' => $counts[CateringAttendanceStatus::EventUnit->value],
+            'countPuasa' => $counts[CateringAttendanceStatus::Puasa->value],
             'countLibur' => $counts[CateringAttendanceStatus::Libur->value],
             'logoDataUri' => $this->logoDataUri(),
         ];
@@ -483,12 +488,8 @@ class CateringInvoiceService
     /**
      * Keep only the attendance days an invoice is allowed to present.
      *
-     * Catering attendance is stored for the whole month, and the initializer
-     * marks Saturday and Sunday as "libur". Those weekend rows stay in the
-     * database, but an invoice only reports working days, so they never reach
-     * the detail table or the status recap. The filter looks at the day of the
-     * week, never at the status, so a weekday an administrator marked "libur"
-     * by hand is still printed.
+     * Libur remains stored as attendance history but is not relevant to invoice
+     * presentation. Every other status remains visible regardless of weekday.
      *
      * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
      * @return array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>
@@ -497,7 +498,7 @@ class CateringInvoiceService
     {
         return array_values(array_filter(
             $rows,
-            fn (array $row): bool => ! CarbonImmutable::parse($row['dateIso'])->isWeekend(),
+            fn (array $row): bool => $row['status'] !== CateringAttendanceStatus::Libur,
         ));
     }
 
@@ -521,7 +522,6 @@ class CateringInvoiceService
                 'number' => $number,
                 'date' => $row['date'],
                 'status' => $row['status']->label(),
-                'note' => $isBillable ? self::BILLABLE_NOTE : self::NON_BILLABLE_NOTE,
                 'isBillable' => $isBillable,
                 'pricePerDayFormatted' => $isBillable ? $this->formatRupiah($pricePerDay) : '-',
                 'subtotal' => $subtotal,

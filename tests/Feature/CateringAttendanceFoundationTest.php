@@ -11,6 +11,16 @@ it('defines the tidak ikut attendance status', function () {
         ->and(CateringAttendanceStatus::TidakIkut->shorthand())->toBe('T');
 });
 
+it('defines the manual non-billable attendance statuses', function (CateringAttendanceStatus $status, string $value, string $label, string $shorthand) {
+    expect($status->value)->toBe($value)
+        ->and($status->label())->toBe($label)
+        ->and($status->shorthand())->toBe($shorthand);
+})->with([
+    'ujian' => [CateringAttendanceStatus::Ujian, 'ujian', 'Ujian', 'U'],
+    'event unit' => [CateringAttendanceStatus::EventUnit, 'event_unit', 'Event Unit', 'E'],
+    'puasa' => [CateringAttendanceStatus::Puasa, 'puasa', 'Puasa', 'P'],
+]);
+
 it('creates attendance with typed status and date for a catering member', function () {
     $member = CateringMember::factory()->create();
     $attendance = CateringAttendance::factory()->for($member)->create([

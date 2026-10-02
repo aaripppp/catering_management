@@ -130,6 +130,9 @@ it('never overwrites a status that is already stored', function (CateringAttenda
     'izin' => [CateringAttendanceStatus::Izin],
     'alfa' => [CateringAttendanceStatus::Alfa],
     'tidak ikut' => [CateringAttendanceStatus::TidakIkut],
+    'ujian' => [CateringAttendanceStatus::Ujian],
+    'event unit' => [CateringAttendanceStatus::EventUnit],
+    'puasa' => [CateringAttendanceStatus::Puasa],
     'libur' => [CateringAttendanceStatus::Libur],
 ]);
 
@@ -308,6 +311,26 @@ it('auto saves tidak ikut immediately and keeps it after reload', function () {
     autoSaveMatrix($schoolClass, $user)
         ->assertSet("attendance.{$member->id}.2026-09-01", 'tidak_ikut');
 });
+
+it('auto saves a manual non-billable status and keeps it after reload', function (CateringAttendanceStatus $status) {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+    $user = User::factory()->admin()->create();
+
+    autoSaveMatrix($schoolClass, $user)
+        ->call('setCellStatus', $member->id, '2026-09-01', $status->value)
+        ->assertSet('saveState.saved', true)
+        ->assertHasNoErrors();
+
+    expect(storedStatus($member->id, '2026-09-01'))->toBe($status);
+
+    autoSaveMatrix($schoolClass, $user)
+        ->assertSet("attendance.{$member->id}.2026-09-01", $status->value);
+})->with([
+    'ujian' => [CateringAttendanceStatus::Ujian],
+    'event unit' => [CateringAttendanceStatus::EventUnit],
+    'puasa' => [CateringAttendanceStatus::Puasa],
+]);
 
 it('does not need a manual save step to persist a cell', function () {
     $schoolClass = autoSaveClass();

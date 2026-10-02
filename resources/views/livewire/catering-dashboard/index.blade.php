@@ -244,12 +244,12 @@
     {{-- Detail modal. The panel is capped and centred, and only the participant
          list scrolls, so a long class never grows the modal past the viewport. --}}
     @if ($detailKey !== null)
-        <div class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4 sm:p-6" role="dialog" aria-modal="true"
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeDetail()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4 sm:p-6" role="dialog" aria-modal="true"
             aria-labelledby="recap-detail-title">
-            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" wire:click="closeDetail"></div>
+            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" wire:click="closeDetail" aria-hidden="true"></div>
 
             <div
-                class="relative z-10 flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                 <div class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-3">
                     <div class="min-w-0">
                         <h3 id="recap-detail-title" class="truncate text-sm font-semibold leading-5 text-slate-900">

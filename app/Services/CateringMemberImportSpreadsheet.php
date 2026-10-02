@@ -114,15 +114,16 @@ class CateringMemberImportSpreadsheet
 
             $categorySheet = $writer->addNewSheetAndMakeItCurrent();
             $categorySheet->setName('REFERENSI KATEGORI');
-            $writer->addRow(Row::fromValues(['Nama Kategori', 'Harga / Hari', 'Status']));
+            $writer->addRow(Row::fromValues(['Nama Kategori', 'Kelompok', 'Harga / Hari', 'Status']));
 
             CateringCategory::query()
-                ->select(['id', 'name', 'price_per_day', 'is_active'])
+                ->select(['id', 'name', 'participant_group', 'price_per_day', 'is_active'])
                 ->orderBy('name')
                 ->get()
                 ->each(function (CateringCategory $category) use ($writer): void {
                     $writer->addRow(Row::fromValues([
                         $category->name,
+                        $category->participant_group->label(),
                         $category->formatted_price_per_day,
                         $category->is_active ? 'Aktif' : 'Nonaktif',
                     ]));
@@ -132,14 +133,19 @@ class CateringMemberImportSpreadsheet
             $guideSheet->setName('PANDUAN');
             $writer->addRow(Row::fromValues(['PANDUAN IMPORT PESERTA CATERING']));
             $writer->addRow(Row::fromValues([]));
-            $writer->addRow(Row::fromValues(['WAJIB', 'Nama', 'Kelas']));
+            $writer->addRow(Row::fromValues(['WAJIB', 'Nama']));
+            $writer->addRow(Row::fromValues(['KONDISIONAL', 'Kelas wajib untuk kategori kelompok Siswa dan harus dikosongkan untuk kelompok Pegawai.']));
             $writer->addRow(Row::fromValues(['OPSIONAL', 'Kategori', 'Jenis Kelamin', 'Nama Wali', 'No HP Wali', 'No HP', 'Catatan']));
             $writer->addRow(Row::fromValues([]));
             $writer->addRow(Row::fromValues(['Jika Kategori kosong, otomatis menggunakan "Siswa Umum".']));
-            $writer->addRow(Row::fromValues(['Nama kelas harus cocok dengan master Kelas pada sheet REFERENSI KELAS.']));
+            $writer->addRow(Row::fromValues(['Kelas wajib untuk kategori kelompok Siswa dan boleh kosong untuk kategori kelompok Pegawai.']));
+            $writer->addRow(Row::fromValues(['Nama kelas siswa harus cocok dengan master Kelas pada sheet REFERENSI KELAS.']));
             $writer->addRow(Row::fromValues(['Kategori harus cocok dengan master Kategori Harga pada sheet REFERENSI KATEGORI.']));
             $writer->addRow(Row::fromValues(['Jangan membuat kelas atau kategori melalui file import.']));
             $writer->addRow(Row::fromValues(['Gunakan L atau P untuk Jenis Kelamin.']));
+            $writer->addRow(Row::fromValues([]));
+            $writer->addRow(Row::fromValues(['CONTOH SISWA', 'Ahmad Fauzan', '7A', 'Siswa Umum']));
+            $writer->addRow(Row::fromValues(['CONTOH PEGAWAI', 'Ustadz Hasan', '[kosong]', 'Guru']));
         } finally {
             $writer->close();
         }

@@ -13,7 +13,7 @@
         @livewireScripts
     </head>
     <body class="bg-slate-50 font-sans text-slate-900 antialiased">
-        <div x-data="{ sidebarOpen: false }" class="min-h-screen">
+        <div x-data="{ sidebarOpen: false }" x-scroll-lock="sidebarOpen" x-on:keydown.escape.window="sidebarOpen = false" class="min-h-screen">
             @include('layouts.navigation')
 
             <div class="min-h-screen lg:pl-72">

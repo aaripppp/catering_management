@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CateringParticipantGroup;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
 use App\Models\SchoolClass;
@@ -24,67 +25,88 @@ class CateringMemberImportService
             ->get()
             ->keyBy(fn (SchoolClass $schoolClass): string => $this->normalizeLookup($schoolClass->name));
         $categories = CateringCategory::query()
-            ->select(['id', 'name'])
+            ->select(['id', 'name', 'participant_group'])
             ->get()
             ->keyBy(fn (CateringCategory $category): string => $this->normalizeLookup($category->name));
-        $fileDuplicateCounts = collect($rows)
-            ->map(fn (array $row): string => $this->duplicateKey(
-                $this->clean($row['name'] ?? ''),
-                $this->clean($row['class_name'] ?? ''),
-            ))
-            ->filter()
-            ->countBy();
         $existingMemberKeys = CateringMember::query()
-            ->whereNotNull('school_class_id')
-            ->get(['name', 'school_class_id'])
-            ->mapWithKeys(fn (CateringMember $member): array => [
-                $this->normalizeLookup($member->name).'|'.$member->school_class_id => true,
-            ]);
+            ->with([
+                'cateringCategory:id,participant_group',
+                'schoolClass:id',
+            ])
+            ->get(['name', 'school_class_id', 'catering_category_id'])
+            ->map(fn (CateringMember $member): string => $this->memberDuplicateKey($member))
+            ->filter()
+            ->flip();
 
-        $previewRows = collect($rows)->map(function (array $row) use ($classes, $categories, $fileDuplicateCounts, $existingMemberKeys): array {
+        $preparedRows = collect($rows)->map(function (array $row) use ($classes, $categories): array {
             $preparedRow = $this->prepareRow($row);
             $errors = $this->rowErrors($preparedRow);
-            $schoolClass = $classes->get($this->normalizeLookup($preparedRow['class_name']));
             $requestedCategory = $preparedRow['category_name'] !== ''
                 ? $preparedRow['category_name']
                 : self::DEFAULT_CATEGORY;
             $category = $categories->get($this->normalizeLookup($requestedCategory));
+            $schoolClass = null;
 
-            if ($preparedRow['class_name'] !== '' && ! $schoolClass) {
-                $errors[] = sprintf('Kelas "%s" tidak ditemukan.', $preparedRow['class_name']);
-            }
-
-            if (! $category) {
+            if ($category === null) {
                 $errors[] = $preparedRow['category_name'] === ''
-                    ? 'Kategori default "Siswa Umum" tidak ditemukan.'
-                    : sprintf('Kategori "%s" tidak ditemukan.', $preparedRow['category_name']);
-            }
+                    ? 'Kategori default Siswa Umum tidak ditemukan.'
+                    : 'Kategori tidak ditemukan.';
+            } elseif ($category->participant_group->requiresClassSelection()) {
+                if ($preparedRow['class_name'] === '') {
+                    $errors[] = 'Kelas wajib diisi untuk kategori peserta siswa.';
+                } else {
+                    $schoolClass = $classes->get($this->normalizeLookup($preparedRow['class_name']));
 
-            $fileDuplicateKey = $this->duplicateKey($preparedRow['name'], $preparedRow['class_name']);
-
-            if ($fileDuplicateKey !== '' && ($fileDuplicateCounts[$fileDuplicateKey] ?? 0) > 1) {
-                $errors[] = 'Nama dan kelas yang sama muncul lebih dari sekali dalam file.';
-            }
-
-            if ($schoolClass) {
-                $databaseDuplicateKey = $this->normalizeLookup($preparedRow['name']).'|'.$schoolClass->id;
-
-                if ($preparedRow['name'] !== '' && $existingMemberKeys->has($databaseDuplicateKey)) {
-                    $errors[] = 'Peserta dengan nama dan kelas yang sama sudah terdaftar.';
+                    if ($schoolClass === null) {
+                        $errors[] = 'Kelas tidak ditemukan.';
+                    }
                 }
+            } elseif ($preparedRow['class_name'] !== '') {
+                $errors[] = 'Kelas harus dikosongkan untuk kategori peserta pegawai.';
             }
 
-            $errors = array_values(array_unique($errors));
+            $duplicateKey = $this->duplicateKey($preparedRow['name'], $category, $schoolClass);
 
             return [
                 ...$preparedRow,
                 'school_class_id' => $schoolClass?->id,
-                'resolved_class_name' => $schoolClass?->name ?? $preparedRow['class_name'],
+                'resolved_class_name' => $schoolClass?->name ?? '',
                 'catering_category_id' => $category?->id,
                 'resolved_category_name' => $category?->name ?? $requestedCategory,
+                'participant_group' => $category?->participant_group->value,
+                'duplicate_key' => $duplicateKey,
+                'errors' => array_values(array_unique($errors)),
+            ];
+        });
+        $fileDuplicateCounts = $preparedRows
+            ->pluck('duplicate_key')
+            ->filter()
+            ->countBy();
+
+        $previewRows = $preparedRows->map(function (array $preparedRow) use ($fileDuplicateCounts, $existingMemberKeys): array {
+            $errors = $preparedRow['errors'];
+            $duplicateKey = $preparedRow['duplicate_key'];
+            $participantGroup = CateringParticipantGroup::tryFrom((string) $preparedRow['participant_group']);
+
+            if ($duplicateKey !== '' && ($fileDuplicateCounts[$duplicateKey] ?? 0) > 1) {
+                $errors[] = $participantGroup === CateringParticipantGroup::Student
+                    ? 'Nama dan kelas yang sama muncul lebih dari sekali dalam file.'
+                    : 'Nama dan kategori yang sama muncul lebih dari sekali dalam file.';
+            }
+
+            if ($duplicateKey !== '' && $existingMemberKeys->has($duplicateKey)) {
+                $errors[] = $participantGroup === CateringParticipantGroup::Student
+                    ? 'Peserta dengan nama dan kelas yang sama sudah terdaftar.'
+                    : 'Peserta dengan nama dan kategori yang sama sudah terdaftar.';
+            }
+
+            unset($preparedRow['duplicate_key']);
+
+            return [
+                ...$preparedRow,
                 'status' => $errors === [] ? 'ready' : 'error',
                 'status_label' => $errors === [] ? 'Siap Import' : 'Bermasalah: '.implode(' ', $errors),
-                'errors' => $errors,
+                'errors' => array_values(array_unique($errors)),
             ];
         })->values();
 
@@ -170,7 +192,7 @@ class CateringMemberImportService
     {
         $validator = Validator::make($row, [
             'name' => ['required', 'string', 'max:255'],
-            'class_name' => ['required', 'string', 'max:255'],
+            'class_name' => ['nullable', 'string', 'max:255'],
             'category_name' => ['nullable', 'string', 'max:255'],
             'gender' => ['nullable', 'in:L,P'],
             'guardian_name' => ['nullable', 'string', 'max:255'],
@@ -194,13 +216,35 @@ class CateringMemberImportService
         return $validator->errors()->all();
     }
 
-    private function duplicateKey(string $name, string $className): string
-    {
-        if ($name === '' || $className === '') {
+    private function duplicateKey(
+        string $name,
+        ?CateringCategory $category,
+        ?SchoolClass $schoolClass,
+    ): string {
+        if ($name === '' || $category === null) {
             return '';
         }
 
-        return $this->normalizeLookup($name).'|'.$this->normalizeLookup($className);
+        return match ($category->participant_group) {
+            CateringParticipantGroup::Student => $schoolClass === null
+                ? ''
+                : CateringParticipantGroup::Student->value.'|'.$this->normalizeLookup($name).'|'.$schoolClass->id,
+            CateringParticipantGroup::Employee => CateringParticipantGroup::Employee->value
+                .'|'.$this->normalizeLookup($name).'|'.$category->id,
+        };
+    }
+
+    private function memberDuplicateKey(CateringMember $member): string
+    {
+        if ($member->cateringCategory === null) {
+            return '';
+        }
+
+        return $this->duplicateKey(
+            $member->name,
+            $member->cateringCategory,
+            $member->schoolClass,
+        );
     }
 
     private function normalizeLookup(string $value): string

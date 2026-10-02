@@ -248,10 +248,10 @@
      Modal
     ------------------------------------------------------------------ */
     .modal-backdrop {
-        @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px];
+        @apply fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-900/50 p-4 backdrop-blur-[1px];
     }
 
     .modal-panel {
-        @apply w-full rounded-xl bg-white shadow-xl;
+        @apply flex max-h-[90vh] max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl;
     }
 }

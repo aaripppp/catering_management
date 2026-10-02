@@ -22,7 +22,7 @@
                 <div class="card-header">
                     <div>
                         <h2 class="card-title">Upload Data Peserta</h2>
-                        <p class="muted mt-1">Pilih file XLSX untuk divalidasi sebelum data disimpan.</p>
+                        <p class="muted mt-1">Pilih file XLSX siswa atau pegawai untuk divalidasi sebelum data disimpan.</p>
                     </div>
                 </div>
 
@@ -56,7 +56,7 @@
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8m-6-6 6 6m-6-6v6h6" /></svg>
                 </div>
                 <h2 class="mt-3 text-base font-semibold text-slate-900">Template Excel</h2>
-                <p class="mt-1 text-sm text-slate-500">Template memuat referensi kelas, kategori harga, dan panduan pengisian.</p>
+                <p class="mt-1 text-sm text-slate-500">Template memuat referensi kelas, kelompok kategori, dan panduan pengisian siswa maupun pegawai seperti guru, TU, yayasan, dan SDM.</p>
                 <button type="button" wire:click="downloadTemplate" class="btn-secondary mt-4 w-full">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
                     Download Template
@@ -64,7 +64,9 @@
 
                 <div class="mt-4 space-y-2 border-t border-slate-200 pt-4 text-sm text-slate-600">
                     <p class="font-semibold text-slate-900">Wajib</p>
-                    <p>Nama, Kelas</p>
+                    <p>Nama untuk semua peserta.</p>
+                    <p class="pt-1 font-semibold text-slate-900">Kondisional</p>
+                    <p>Kelas wajib untuk kategori siswa dan harus dikosongkan untuk kategori pegawai.</p>
                     <p class="pt-1 font-semibold text-slate-900">Opsional</p>
                     <p>Kategori, Jenis Kelamin, data wali, nomor HP, dan catatan.</p>
                     <p class="pt-1 text-xs text-slate-500">Kategori kosong otomatis menggunakan Siswa Umum.</p>

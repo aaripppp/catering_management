@@ -15,6 +15,9 @@
             'izin' => 'border-blue-700 bg-blue-500 text-white hover:bg-blue-600 focus-visible:ring-blue-300',
             'alfa' => 'border-red-700 bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-300',
             'tidak_ikut' => 'border-violet-800 bg-violet-600 text-white hover:bg-violet-700 focus-visible:ring-violet-300',
+            'ujian' => 'border-cyan-700 bg-cyan-500 text-white hover:bg-cyan-600 focus-visible:ring-cyan-300',
+            'event_unit' => 'border-fuchsia-800 bg-fuchsia-600 text-white hover:bg-fuchsia-700 focus-visible:ring-fuchsia-300',
+            'puasa' => 'border-indigo-800 bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-300',
             'libur' => 'border-slate-800 bg-slate-600 text-white hover:bg-slate-700 focus-visible:ring-slate-300',
         ];
         $statusSelectedClasses = [
@@ -23,6 +26,9 @@
             'izin' => 'scale-[1.03] shadow-md ring-4 ring-blue-300 ring-offset-2',
             'alfa' => 'scale-[1.03] shadow-md ring-4 ring-red-300 ring-offset-2',
             'tidak_ikut' => 'scale-[1.03] shadow-md ring-4 ring-violet-300 ring-offset-2',
+            'ujian' => 'scale-[1.03] shadow-md ring-4 ring-cyan-300 ring-offset-2',
+            'event_unit' => 'scale-[1.03] shadow-md ring-4 ring-fuchsia-300 ring-offset-2',
+            'puasa' => 'scale-[1.03] shadow-md ring-4 ring-indigo-300 ring-offset-2',
             'libur' => 'scale-[1.03] shadow-md ring-4 ring-slate-300 ring-offset-2',
         ];
         $selectedClass = collect($classOptions)->firstWhere('id', (int) $schoolClassId);
@@ -133,7 +139,7 @@
             </div>
         </section>
     @else
-        <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             @foreach ([
                 ['label' => 'Jumlah Peserta', 'value' => $summary['participants'], 'class' => 'text-slate-900'],
                 ['label' => 'Ikut', 'value' => $summary['ikut'], 'class' => 'text-emerald-700'],
@@ -141,6 +147,10 @@
                 ['label' => 'Izin', 'value' => $summary['izin'], 'class' => 'text-blue-700'],
                 ['label' => 'Alfa', 'value' => $summary['alfa'], 'class' => 'text-red-700'],
                 ['label' => 'Tidak Ikut', 'value' => $summary['tidak_ikut'], 'class' => 'text-violet-800'],
+                ['label' => 'Ujian', 'value' => $summary['ujian'], 'class' => 'text-cyan-700'],
+                ['label' => 'Event Unit', 'value' => $summary['event_unit'], 'class' => 'text-fuchsia-700'],
+                ['label' => 'Puasa', 'value' => $summary['puasa'], 'class' => 'text-indigo-700'],
+                ['label' => 'Libur', 'value' => $summary['libur'], 'class' => 'text-slate-600'],
             ] as $item)
                 <div class="card px-4 py-3">
                     <p class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ $item['label'] }}</p>
@@ -345,11 +355,11 @@
             $editingDateInfo = collect($dates)->firstWhere('date', $editingDate);
             $editingStatus = $attendance[$editingMemberId][$editingDate];
         @endphp
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-status-title">
-            <button type="button" wire:click="closeStatusMenu" class="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" aria-label="Tutup pilihan status"></button>
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeStatusMenu()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-status-title">
+            <div wire:click="closeStatusMenu" class="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" aria-hidden="true"></div>
 
-            <div class="relative z-10 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-                <div class="flex items-start justify-between gap-4">
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
                     <div>
                         <h3 id="attendance-status-title" class="font-semibold text-slate-900">Pilih Status</h3>
                         <p class="mt-1 text-sm text-slate-500">
@@ -362,7 +372,7 @@
                     </button>
                 </div>
 
-                <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div class="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto overscroll-contain p-5 sm:grid-cols-3">
                     @foreach ($statusOptions as $status)
                         <button
                             type="button"

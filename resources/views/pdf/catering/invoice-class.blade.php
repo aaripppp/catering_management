@@ -227,16 +227,19 @@
 <table class="detail">
     <thead>
         <tr>
-            <th class="num" style="width: 4%;">No</th>
-            <th style="width: 24%;">Nama Siswa</th>
-            <th class="num" style="width: 7%;">Ikut</th>
-            <th class="num" style="width: 7%;">Sakit</th>
-            <th class="num" style="width: 7%;">Izin</th>
-            <th class="num" style="width: 7%;">Alfa</th>
-            <th class="num" style="width: 7%;">Tdk Ikut</th>
-            <th class="num" style="width: 7%;">Libur</th>
-            <th class="right nowrap" style="width: 14%;">Harga / Ikut</th>
-            <th class="right nowrap" style="width: 16%;">Total</th>
+            <th class="num" style="width: 3%;">No</th>
+            <th style="width: 18%;">Nama Siswa</th>
+            <th class="num" style="width: 5%;">Ikut</th>
+            <th class="num" style="width: 5%;">Sakit</th>
+            <th class="num" style="width: 5%;">Izin</th>
+            <th class="num" style="width: 5%;">Alfa</th>
+            <th class="num" style="width: 5%;">Tdk Ikut</th>
+            <th class="num" style="width: 5%;">Ujian</th>
+            <th class="num" style="width: 6%;">Event</th>
+            <th class="num" style="width: 5%;">Puasa</th>
+            <th class="num" style="width: 5%;">Libur</th>
+            <th class="right nowrap" style="width: 15%;">Harga / Ikut</th>
+            <th class="right nowrap" style="width: 18%;">Total</th>
         </tr>
     </thead>
     <tbody>
@@ -249,13 +252,16 @@
                 <td class="num">{{ $row['izin'] }}</td>
                 <td class="num">{{ $row['alfa'] }}</td>
                 <td class="num">{{ $row['tidakIkut'] }}</td>
+                <td class="num">{{ $row['ujian'] }}</td>
+                <td class="num">{{ $row['eventUnit'] }}</td>
+                <td class="num">{{ $row['puasa'] }}</td>
                 <td class="num">{{ $row['libur'] }}</td>
                 <td class="right nowrap">{{ $row['pricePerDayFormatted'] }}</td>
                 <td class="right nowrap">{{ $row['totalFormatted'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="10" class="num">Belum ada peserta aktif pada kelas ini.</td>
+                <td colspan="13" class="num">Belum ada peserta aktif pada kelas ini.</td>
             </tr>
         @endforelse
     </tbody>
@@ -268,6 +274,9 @@
                 <td class="num">{{ $totalIzin }}</td>
                 <td class="num">{{ $totalAlfa }}</td>
                 <td class="num">{{ $totalTidakIkut }}</td>
+                <td class="num">{{ $totalUjian }}</td>
+                <td class="num">{{ $totalEventUnit }}</td>
+                <td class="num">{{ $totalPuasa }}</td>
                 <td class="num">{{ $totalLibur }}</td>
                 <td class="right nowrap">-</td>
                 <td class="right nowrap">{{ $grandTotalFormatted }}</td>
@@ -282,7 +291,10 @@
     ditagihkan; status {{ CateringAttendanceStatus::Sakit->label() }},
     {{ CateringAttendanceStatus::Izin->label() }},
     {{ CateringAttendanceStatus::Alfa->label() }},
-    {{ CateringAttendanceStatus::TidakIkut->label() }}, dan
+    {{ CateringAttendanceStatus::TidakIkut->label() }},
+    {{ CateringAttendanceStatus::Ujian->label() }},
+    {{ CateringAttendanceStatus::EventUnit->label() }},
+    {{ CateringAttendanceStatus::Puasa->label() }}, dan
     {{ CateringAttendanceStatus::Libur->label() }} tidak menambah tagihan.
     Harga per porsi mengikuti harga kategori masing-masing peserta, sehingga total bersifat jumlah per peserta
     dan bukan hasil rata-rata harga.

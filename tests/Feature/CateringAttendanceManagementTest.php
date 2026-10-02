@@ -181,6 +181,9 @@ it('uses saved attendance instead of the weekday default', function (CateringAtt
     'saved izin' => [CateringAttendanceStatus::Izin],
     'saved alfa' => [CateringAttendanceStatus::Alfa],
     'saved tidak ikut' => [CateringAttendanceStatus::TidakIkut],
+    'saved ujian' => [CateringAttendanceStatus::Ujian],
+    'saved event unit' => [CateringAttendanceStatus::EventUnit],
+    'saved puasa' => [CateringAttendanceStatus::Puasa],
 ]);
 
 it('marks and restores a whole weekday column', function () {
@@ -300,6 +303,20 @@ it('renders tidak ikut in the attendance modal with violet styling', function ()
         ->assertSeeHtml('scale-[1.03] shadow-md ring-4 ring-emerald-300 ring-offset-2');
 });
 
+it('renders the manual non-billable statuses with distinct high contrast styling', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+
+    openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->assertSee('Ujian')
+        ->assertSee('Event Unit')
+        ->assertSee('Puasa')
+        ->assertSeeHtml('border-cyan-700 bg-cyan-500 text-white hover:bg-cyan-600 focus-visible:ring-cyan-300')
+        ->assertSeeHtml('border-fuchsia-800 bg-fuchsia-600 text-white hover:bg-fuchsia-700 focus-visible:ring-fuchsia-300')
+        ->assertSeeHtml('border-indigo-800 bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-300');
+});
+
 it('requires a participant group before a matrix can be loaded', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
@@ -407,19 +424,26 @@ it('switches straight to the employee matrix when the group changes', function (
         ->assertSet('loadedParticipantGroup', CateringParticipantGroup::Employee->value);
 });
 
-it('summarizes current matrix state without counting libur as an absence', function () {
+it('summarizes every attendance status in the current matrix', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $member->id, '2026-09-01', 'sakit')
         ->call('setCellStatus', $member->id, '2026-09-02', 'tidak_ikut')
+        ->call('setCellStatus', $member->id, '2026-09-03', 'ujian')
+        ->call('setCellStatus', $member->id, '2026-09-04', 'event_unit')
+        ->call('setCellStatus', $member->id, '2026-09-07', 'puasa')
         ->assertViewHas('summary', fn (array $summary): bool => $summary === [
             'participants' => 1,
-            'ikut' => 20,
+            'ikut' => 17,
             'sakit' => 1,
             'izin' => 0,
             'alfa' => 0,
             'tidak_ikut' => 1,
+            'ujian' => 1,
+            'event_unit' => 1,
+            'puasa' => 1,
+            'libur' => 8,
         ]);
 });

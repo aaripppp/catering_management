@@ -106,11 +106,11 @@
 
     {{-- CREATE/EDIT MODAL --}}
     @if ($showFormModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="school-class-modal-title">
-            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"></div>
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeFormModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="school-class-modal-title">
+            <div wire:click="closeFormModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
 
-            <div class="relative z-10 w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
                     <div>
                         <h3 id="school-class-modal-title" class="text-base font-semibold text-slate-900">{{ $editingId ? 'Edit Kelas' : 'Tambah Kelas' }}</h3>
                         <p class="mt-1 text-sm text-slate-500">Lengkapi informasi kelas di bawah ini.</p>
@@ -120,8 +120,8 @@
                     </button>
                 </div>
 
-                <form wire:submit="save">
-                    <div class="space-y-5 px-5 py-5 sm:px-6">
+                <form wire:submit="save" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
                         <div>
                             <label for="school-class-name" class="label">Nama Kelas</label>
                             <input id="school-class-name" type="text" wire:model="name" class="input" placeholder="Contoh: VII A" />
@@ -153,7 +153,7 @@
                         </label>
                     </div>
 
-                    <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
                         <button type="button" wire:click="closeFormModal" class="btn-secondary">Batal</button>
                         <button type="submit" wire:loading.attr="disabled" class="btn-primary">
                             <span wire:loading.remove wire:target="save">Simpan</span>
@@ -167,11 +167,11 @@
 
     {{-- DELETE CONFIRMATION MODAL --}}
     @if ($showDeleteModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
-            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"></div>
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeDeleteModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+            <div wire:click="closeDeleteModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
 
-            <div class="relative z-10 w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
                     <div>
                         <h3 id="delete-modal-title" class="text-base font-semibold text-slate-900">Hapus Kelas?</h3>
                         <p class="mt-1 text-sm text-slate-500">Tindakan ini tidak dapat dibatalkan.</p>
@@ -181,7 +181,7 @@
                     </button>
                 </div>
 
-                <div class="px-5 py-4 sm:px-6">
+                <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
                     <p class="text-sm text-slate-700">Apakah Anda yakin ingin menghapus kelas ini?</p>
                     <p class="mt-2 font-medium text-slate-900">{{ $deletingName }}</p>
                     @if ($schoolClass->members_count > 0)
@@ -199,7 +199,7 @@
                     @endif
                 </div>
 
-                <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
                     <button type="button" wire:click="closeDeleteModal" class="btn-secondary">Batal</button>
                     <button type="button" wire:click="deleteConfirmed" class="btn-danger">Ya, Hapus</button>
                 </div>

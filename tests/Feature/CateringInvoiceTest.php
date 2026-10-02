@@ -38,8 +38,8 @@ function invoiceService(): CateringInvoiceService
  * The working days of a month as stored attendance dates, so a fixture can lay a
  * plan over them and a test can compare against them without hard coding.
  *
- * The expectation is derived from the calendar itself, so a test can never drift
- * away from the weekend rule it is checking.
+ * The expectation is derived from the calendar itself so month fixtures do not
+ * drift when their year or month changes.
  *
  * @return array<int, string>
  */
@@ -126,10 +126,8 @@ function selectInvoicePeriodWithoutLoadingMatrix(SchoolClass $schoolClass): Test
  * Persist attendance the way the attendance page does, so invoices can only ever
  * read rows the page itself has saved.
  *
- * The plan is laid out over the working days of September only. An invoice never
- * prints Saturday or Sunday, so spending a planned status on a weekend would
- * silently change the quantity a test expects; weekend coverage lives in the
- * dedicated weekend tests further down.
+ * The plan is laid out over the working days of September. Weekend visibility is
+ * covered separately because invoices now filter by status rather than weekday.
  */
 function saveSeptemberAttendance(
     CateringMember $member,
@@ -138,6 +136,9 @@ function saveSeptemberAttendance(
     int $izin = 0,
     int $alfa = 0,
     int $tidakIkut = 0,
+    int $ujian = 0,
+    int $eventUnit = 0,
+    int $puasa = 0,
     int $libur = 0,
 ): void {
     $statuses = array_merge(
@@ -146,6 +147,9 @@ function saveSeptemberAttendance(
         array_fill(0, $izin, CateringAttendanceStatus::Izin),
         array_fill(0, $alfa, CateringAttendanceStatus::Alfa),
         array_fill(0, $tidakIkut, CateringAttendanceStatus::TidakIkut),
+        array_fill(0, $ujian, CateringAttendanceStatus::Ujian),
+        array_fill(0, $eventUnit, CateringAttendanceStatus::EventUnit),
+        array_fill(0, $puasa, CateringAttendanceStatus::Puasa),
         array_fill(0, $libur, CateringAttendanceStatus::Libur),
     );
 
@@ -318,11 +322,13 @@ function invoiceAttendancePlan(): array
 {
     return [
         [CateringAttendanceStatus::Ikut, 12],
-        [CateringAttendanceStatus::Sakit, 3],
-        [CateringAttendanceStatus::Izin, 2],
-        [CateringAttendanceStatus::Alfa, 2],
+        [CateringAttendanceStatus::Sakit, 2],
+        [CateringAttendanceStatus::Izin, 1],
+        [CateringAttendanceStatus::Alfa, 1],
         [CateringAttendanceStatus::TidakIkut, 2],
-        [CateringAttendanceStatus::Libur, 1],
+        [CateringAttendanceStatus::Ujian, 2],
+        [CateringAttendanceStatus::EventUnit, 1],
+        [CateringAttendanceStatus::Puasa, 1],
     ];
 }
 
@@ -854,7 +860,7 @@ it('bills the current category price because attendance stores no price snapshot
         ->not->toContain('price_per_day');
 });
 
-it('lists every saved attendance date in the individual invoice detail table', function () {
+it('lists every non-libur attendance date in the individual invoice detail table', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 17000]);
     $member = CateringMember::factory()->create([
@@ -874,10 +880,10 @@ it('lists every saved attendance date in the individual invoice detail table', f
         ->and($text)->toContain('03/09/2026')
         ->and($text)->toContain('04/09/2026')
         ->and($text)->toContain('07/09/2026')
-        ->and($text)->toContain('08/09/2026')
+        ->and($text)->not->toContain('08/09/2026')
         ->and($text)->toContain('TANGGAL')
         ->and($text)->toContain('STATUS')
-        ->and($text)->toContain('KETERANGAN')
+        ->and($text)->not->toContain('KETERANGAN')
         ->and($text)->toContain('HARGA / PORSI')
         ->and($text)->toContain('SUBTOTAL');
 });
@@ -897,13 +903,12 @@ it('bills only the ikut row in the individual invoice detail table', function ()
     $rows = collect($invoice['attendanceRows'])->keyBy('date');
 
     expect($rows['01/09/2026']['status'])->toBe('Ikut')
-        ->and($rows['01/09/2026']['note'])->toBe('Dihitung')
         ->and($rows['01/09/2026']['subtotal'])->toBe(17000)
-        ->and($rows['01/09/2026']['pricePerDayFormatted'])->toBe('Rp 17.000');
+        ->and($rows['01/09/2026']['pricePerDayFormatted'])->toBe('Rp 17.000')
+        ->and($rows['01/09/2026'])->not->toHaveKey('note');
 
-    foreach (['02/09/2026', '03/09/2026', '04/09/2026', '07/09/2026', '08/09/2026'] as $nonBillable) {
-        expect($rows[$nonBillable]['note'])->toBe('Tidak dihitung')
-            ->and($rows[$nonBillable]['subtotal'])->toBe(0)
+    foreach (['02/09/2026', '03/09/2026', '04/09/2026', '07/09/2026'] as $nonBillable) {
+        expect($rows[$nonBillable]['subtotal'])->toBe(0)
             ->and($rows[$nonBillable]['pricePerDayFormatted'])->toBe('-');
     }
 
@@ -911,11 +916,10 @@ it('bills only the ikut row in the individual invoice detail table', function ()
         ->and($rows['03/09/2026']['status'])->toBe('Izin')
         ->and($rows['04/09/2026']['status'])->toBe('Alfa')
         ->and($rows['07/09/2026']['status'])->toBe('Tidak Ikut')
-        ->and($rows['07/09/2026']['note'])->toBe('Tidak dihitung')
         ->and($rows['07/09/2026']['pricePerDayFormatted'])->toBe('-')
         ->and($rows['07/09/2026']['subtotal'])->toBe(0)
         ->and($rows['07/09/2026']['subtotalFormatted'])->toBe('Rp 0')
-        ->and($rows['08/09/2026']['status'])->toBe('Libur')
+        ->and($rows)->not->toHaveKey('08/09/2026')
         ->and($invoice['total'])->toBe(17000);
 });
 
@@ -926,7 +930,7 @@ it('summarises every status count in the individual invoice', function () {
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
-    saveSeptemberAttendance($member, ikut: 12, sakit: 3, izin: 2, alfa: 2, tidakIkut: 2, libur: 1);
+    saveSeptemberAttendance($member, ikut: 8, sakit: 2, izin: 2, alfa: 2, tidakIkut: 2, ujian: 2, eventUnit: 1, puasa: 1, libur: 1);
 
     $invoice = invoiceService()->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), ...invoicePeriod());
 
@@ -935,10 +939,17 @@ it('summarises every status count in the individual invoice', function () {
     ));
 
     expect($invoice['countTidakIkut'])->toBe(2)
+        ->and($invoice['countUjian'])->toBe(2)
+        ->and($invoice['countEventUnit'])->toBe(1)
+        ->and($invoice['countPuasa'])->toBe(1)
+        ->and($invoice['countLibur'])->toBe(0)
         ->and($text)->toContain('REKAP ABSENSI')
         ->and($text)->toContain('TIDAK IKUT')
+        ->and($text)->toContain('UJIAN')
+        ->and($text)->toContain('EVENT UNIT')
+        ->and($text)->toContain('PUASA')
         ->and($text)->toContain('TOTAL TAGIHAN')
-        ->and($text)->toContain('Rp 204.000')
+        ->and($text)->toContain('Rp 136.000')
         ->and($text)->not->toContain('Nasi Ayam')
         ->and($text)->not->toContain('Nasi Telur')
         ->and($text)->not->toContain('Transfer')
@@ -1031,7 +1042,7 @@ it('includes only the selected class participants in the class summary pdf', fun
 it('reports per status counts and the participant total in the class summary', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
-    saveSeptemberAttendance($member, ikut: 5, sakit: 2, izin: 1, alfa: 3, tidakIkut: 2, libur: 4);
+    saveSeptemberAttendance($member, ikut: 5, sakit: 2, izin: 1, alfa: 2, tidakIkut: 2, ujian: 2, eventUnit: 1, puasa: 1, libur: 4);
 
     [$start, $end] = invoicePeriod();
     $invoice = invoiceService()->buildClassInvoice($schoolClass, $start, $end);
@@ -1040,16 +1051,22 @@ it('reports per status counts and the participant total in the class summary', f
     expect($row['ikut'])->toBe(5)
         ->and($row['sakit'])->toBe(2)
         ->and($row['izin'])->toBe(1)
-        ->and($row['alfa'])->toBe(3)
+        ->and($row['alfa'])->toBe(2)
         ->and($row['tidakIkut'])->toBe(2)
-        ->and($row['libur'])->toBe(4)
+        ->and($row['ujian'])->toBe(2)
+        ->and($row['eventUnit'])->toBe(1)
+        ->and($row['puasa'])->toBe(1)
+        ->and($row['libur'])->toBe(0)
         ->and($row['total'])->toBe(5 * $row['pricePerDay'])
         ->and($invoice['totalIkut'])->toBe(5)
         ->and($invoice['totalSakit'])->toBe(2)
         ->and($invoice['totalIzin'])->toBe(1)
-        ->and($invoice['totalAlfa'])->toBe(3)
+        ->and($invoice['totalAlfa'])->toBe(2)
         ->and($invoice['totalTidakIkut'])->toBe(2)
-        ->and($invoice['totalLibur'])->toBe(4);
+        ->and($invoice['totalUjian'])->toBe(2)
+        ->and($invoice['totalEventUnit'])->toBe(1)
+        ->and($invoice['totalPuasa'])->toBe(1)
+        ->and($invoice['totalLibur'])->toBe(0);
 
     $text = invoicePdfText(invoiceService()->renderClassPdf($invoice));
 
@@ -1057,6 +1074,9 @@ it('reports per status counts and the participant total in the class summary', f
         ->and($text)->toContain('HARGA / IKUT')
         ->and($text)->toContain('TOTAL')
         ->and($text)->toContain('TDK IKUT')
+        ->and($text)->toContain('UJIAN')
+        ->and($text)->toContain('EVENT')
+        ->and($text)->toContain('PUASA')
         ->and($text)->toContain('LIBUR')
         ->and($text)->not->toContain('Nasi Ayam');
 });
@@ -1336,7 +1356,7 @@ it('fits a shorter month individual invoice on a single a4 page', function (int 
     '30 day month' => [4, 30],
 ]);
 
-it('prints every working day and no weekend of a 31 day month', function () {
+it('prints every saved non-libur day regardless of weekday', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
     $member = CateringMember::factory()->create([
@@ -1353,13 +1373,9 @@ it('prints every working day and no weekend of a 31 day month', function () {
     foreach (invoiceWeekdayDates(2026, 1) as $weekday) {
         expect($text)->toContain(invoiceDateLabel($weekday));
     }
-
-    foreach (invoiceWeekendDates(2026, 1) as $weekend) {
-        expect($text)->not->toContain(invoiceDateLabel($weekend));
-    }
 });
 
-it('still shows every status and billing indication on one page', function () {
+it('still shows every invoice-visible status on one page', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
     $member = CateringMember::factory()->create([
@@ -1378,9 +1394,10 @@ it('still shows every status and billing indication on one page', function () {
         ->and($text)->toContain('IZIN')
         ->and($text)->toContain('ALFA')
         ->and($text)->toContain('TIDAK IKUT')
-        ->and($text)->toContain('LIBUR')
-        ->and($text)->toContain('Dihitung')
-        ->and($text)->toContain('Tidak dihitung')
+        ->and($text)->toContain('UJIAN')
+        ->and($text)->toContain('EVENT UNIT')
+        ->and($text)->toContain('PUASA')
+        ->and($text)->not->toContain('KETERANGAN')
         ->and($text)->toContain('RINCIAN ABSENSI')
         ->and($text)->toContain('REKAP ABSENSI')
         ->and($text)->toContain('TOTAL TAGIHAN')
@@ -1416,7 +1433,7 @@ it('keeps the unpaid statuses at zero on a one page invoice', function () {
     foreach ($unpaid as $row) {
         expect($row['subtotal'])->toBe(0)
             ->and($row['subtotalFormatted'])->toBe('Rp 0')
-            ->and($row['note'])->toBe('Tidak dihitung');
+            ->and($row)->not->toHaveKey('note');
     }
 });
 
@@ -1503,32 +1520,31 @@ it('keeps bulk zip entries on the same one page layout', function () {
 
 /*
 |--------------------------------------------------------------------------
-| Weekend days stay stored but never reach an invoice
+ | Only libur rows stay stored without reaching an invoice
 |--------------------------------------------------------------------------
 |
-| October 2026 starts on a Thursday, so 03/10 is a Saturday and 04/10 a Sunday.
-| The fixture below covers every branch of the rule at once: two billed
-| weekdays, all five unpaid weekday statuses, a Friday an administrator marked
-| "libur" by hand, and the four weekend rows the attendance page stores.
+ | October 2026 starts on a Thursday. This fixture includes libur on a weekday
+ | and weekend, plus non-libur statuses on weekends, proving visibility follows
+ | the saved status and not the calendar day.
 |
 */
 
 /**
  * @return array<string, CateringAttendanceStatus>
  */
-function octoberWeekendRuleAttendance(): array
+function octoberInvoiceVisibilityAttendance(): array
 {
     return [
         '2026-10-01' => CateringAttendanceStatus::Ikut,
         '2026-10-02' => CateringAttendanceStatus::Libur,
-        '2026-10-03' => CateringAttendanceStatus::Libur,
-        '2026-10-04' => CateringAttendanceStatus::Libur,
+        '2026-10-03' => CateringAttendanceStatus::Ujian,
+        '2026-10-04' => CateringAttendanceStatus::EventUnit,
         '2026-10-05' => CateringAttendanceStatus::Ikut,
         '2026-10-06' => CateringAttendanceStatus::Sakit,
         '2026-10-07' => CateringAttendanceStatus::Izin,
         '2026-10-08' => CateringAttendanceStatus::Alfa,
         '2026-10-09' => CateringAttendanceStatus::TidakIkut,
-        '2026-10-10' => CateringAttendanceStatus::Libur,
+        '2026-10-10' => CateringAttendanceStatus::Puasa,
         '2026-10-11' => CateringAttendanceStatus::Libur,
     ];
 }
@@ -1544,7 +1560,7 @@ function octoberPeriod(): array
 }
 
 /**
- * A member carrying the weekend rule fixture, already refreshed for invoicing.
+ * A member carrying the visibility fixture, already refreshed for invoicing.
  *
  * @return array{0: CateringMember, 1: SchoolClass, 2: CateringCategory}
  */
@@ -1558,7 +1574,7 @@ function octoberInvoiceFixture(int $pricePerDay = 17000): array
         'catering_category_id' => $category->id,
     ]);
 
-    foreach (octoberWeekendRuleAttendance() as $date => $status) {
+    foreach (octoberInvoiceVisibilityAttendance() as $date => $status) {
         CateringAttendance::factory()->for($member)->create([
             'attendance_date' => $date,
             'status' => $status,
@@ -1568,36 +1584,38 @@ function octoberInvoiceFixture(int $pricePerDay = 17000): array
     return [$member->fresh(['cateringCategory', 'schoolClass']), $schoolClass, $category];
 }
 
-it('omits a weekend day from the individual invoice', function (string $weekend) {
+it('omits libur from the individual invoice regardless of weekday', function (string $liburDate) {
     [$member] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildMemberInvoice($member, ...octoberPeriod());
     $text = invoicePdfText(invoiceService()->renderPdf($invoice));
 
-    expect(array_column($invoice['attendanceRows'], 'date'))->not->toContain($weekend)
-        ->and($text)->not->toContain($weekend);
+    expect(array_column($invoice['attendanceRows'], 'date'))->not->toContain($liburDate)
+        ->and($text)->not->toContain($liburDate.' Libur');
 })->with([
-    'saturday' => ['03/10/2026'],
-    'sunday' => ['04/10/2026'],
+    'weekday libur' => ['02/10/2026'],
+    'weekend libur' => ['11/10/2026'],
 ]);
 
-it('keeps every monday to friday row of the individual invoice', function () {
+it('keeps every non-libur row of the individual invoice', function () {
     [$member] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildMemberInvoice($member, ...octoberPeriod());
 
     expect(array_column($invoice['attendanceRows'], 'date'))->toBe([
         '01/10/2026',
-        '02/10/2026',
+        '03/10/2026',
+        '04/10/2026',
         '05/10/2026',
         '06/10/2026',
         '07/10/2026',
         '08/10/2026',
         '09/10/2026',
+        '10/10/2026',
     ]);
 });
 
-it('keeps an unpaid weekday status visible in the individual invoice', function (CateringAttendanceStatus $status, string $date) {
+it('keeps each non-libur unpaid status visible in the individual invoice', function (CateringAttendanceStatus $status, string $date) {
     [$member] = octoberInvoiceFixture();
 
     $rows = collect(invoiceService()->buildMemberInvoice($member, ...octoberPeriod())['attendanceRows'])
@@ -1605,31 +1623,36 @@ it('keeps an unpaid weekday status visible in the individual invoice', function 
 
     expect($rows[$date]['status'])->toBe($status->label())
         ->and($rows[$date]['isBillable'])->toBeFalse()
-        ->and($rows[$date]['note'])->toBe('Tidak dihitung')
         ->and($rows[$date]['subtotal'])->toBe(0)
-        ->and($rows[$date]['subtotalFormatted'])->toBe('Rp 0');
+        ->and($rows[$date]['subtotalFormatted'])->toBe('Rp 0')
+        ->and($rows[$date])->not->toHaveKey('note');
 })->with([
     'sakit' => [CateringAttendanceStatus::Sakit, '06/10/2026'],
     'izin' => [CateringAttendanceStatus::Izin, '07/10/2026'],
     'alfa' => [CateringAttendanceStatus::Alfa, '08/10/2026'],
     'tidak ikut' => [CateringAttendanceStatus::TidakIkut, '09/10/2026'],
-    'libur marked by hand' => [CateringAttendanceStatus::Libur, '02/10/2026'],
+    'ujian on saturday' => [CateringAttendanceStatus::Ujian, '03/10/2026'],
+    'event unit on sunday' => [CateringAttendanceStatus::EventUnit, '04/10/2026'],
+    'puasa on saturday' => [CateringAttendanceStatus::Puasa, '10/10/2026'],
 ]);
 
-it('recaps the hand marked weekday libur without the weekend ones', function () {
+it('recaps only statuses visible in the individual invoice', function () {
     [$member] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildMemberInvoice($member, ...octoberPeriod());
 
-    expect($invoice['countLibur'])->toBe(1)
+    expect($invoice['countLibur'])->toBe(0)
         ->and($invoice['countIkut'])->toBe(2)
         ->and($invoice['countSakit'])->toBe(1)
         ->and($invoice['countIzin'])->toBe(1)
         ->and($invoice['countAlfa'])->toBe(1)
-        ->and($invoice['countTidakIkut'])->toBe(1);
+        ->and($invoice['countTidakIkut'])->toBe(1)
+        ->and($invoice['countUjian'])->toBe(1)
+        ->and($invoice['countEventUnit'])->toBe(1)
+        ->and($invoice['countPuasa'])->toBe(1);
 });
 
-it('keeps the bill equal to the printed rows while the weekends stay hidden', function () {
+it('keeps the bill equal to the printed rows while libur stays hidden', function () {
     [$member, , $category] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildMemberInvoice($member, ...octoberPeriod());
@@ -1642,27 +1665,27 @@ it('keeps the bill equal to the printed rows while the weekends stay hidden', fu
         ->and($invoice['savedDays'])->toBe(11);
 });
 
-it('numbers the printed rows without calendar gaps', function () {
+it('numbers the printed rows without gaps left by hidden libur dates', function () {
     [$member] = octoberInvoiceFixture();
 
     $rows = invoiceService()->buildMemberInvoice($member, ...octoberPeriod())['attendanceRows'];
 
-    expect(array_column($rows, 'number'))->toBe([1, 2, 3, 4, 5, 6, 7]);
+    expect(array_column($rows, 'number'))->toBe([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 });
 
-it('keeps a weekend marked as ikut out of both the rows and the bill', function () {
+it('includes a weekend marked as ikut in both the rows and the bill', function () {
     [$member, , $category] = octoberInvoiceFixture();
 
     CateringAttendance::query()
         ->where('catering_member_id', $member->id)
-        ->whereDate('attendance_date', '2026-10-03')
+        ->whereDate('attendance_date', '2026-10-11')
         ->update(['status' => CateringAttendanceStatus::Ikut->value]);
 
     $invoice = invoiceService()->buildMemberInvoice($member->fresh(['cateringCategory']), ...octoberPeriod());
 
-    expect($invoice['quantity'])->toBe(2)
-        ->and($invoice['total'])->toBe(2 * $category->price_per_day)
-        ->and(array_column($invoice['attendanceRows'], 'date'))->not->toContain('03/10/2026');
+    expect($invoice['quantity'])->toBe(3)
+        ->and($invoice['total'])->toBe(3 * $category->price_per_day)
+        ->and(array_column($invoice['attendanceRows'], 'date'))->toContain('11/10/2026');
 });
 
 it('prints only the working days of a fully initialised october', function () {
@@ -1693,7 +1716,7 @@ it('prints only the working days of a fully initialised october', function () {
     }
 });
 
-it('keeps the class summary free of the weekend days', function () {
+it('keeps libur out of class status counts while preserving saved day totals', function () {
     [$member, $schoolClass] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildClassInvoice($schoolClass, ...octoberPeriod());
@@ -1704,15 +1727,21 @@ it('keeps the class summary free of the weekend days', function () {
         ->and($row['izin'])->toBe(1)
         ->and($row['alfa'])->toBe(1)
         ->and($row['tidakIkut'])->toBe(1)
-        ->and($row['libur'])->toBe(1)
+        ->and($row['ujian'])->toBe(1)
+        ->and($row['eventUnit'])->toBe(1)
+        ->and($row['puasa'])->toBe(1)
+        ->and($row['libur'])->toBe(0)
         ->and($row['savedDays'])->toBe(11)
         ->and($row['total'])->toBe(2 * $row['pricePerDay'])
         ->and($invoice['totalIkut'])->toBe(2)
-        ->and($invoice['totalLibur'])->toBe(1)
+        ->and($invoice['totalUjian'])->toBe(1)
+        ->and($invoice['totalEventUnit'])->toBe(1)
+        ->and($invoice['totalPuasa'])->toBe(1)
+        ->and($invoice['totalLibur'])->toBe(0)
         ->and($invoice['grandTotal'])->toBe(2 * 17000);
 });
 
-it('leaves the weekend attendance rows stored while invoicing', function () {
+it('leaves all attendance rows stored while invoicing', function () {
     [$member, $schoolClass] = octoberInvoiceFixture();
 
     $snapshot = fn (): array => CateringAttendance::query()
@@ -1732,14 +1761,13 @@ it('leaves the weekend attendance rows stored while invoicing', function () {
     expect($snapshot())->toEqual($before)
         ->and(CateringAttendance::query()
             ->get(['attendance_date', 'status'])
-            ->filter(fn (CateringAttendance $row): bool => $row->attendance_date->isWeekend()
-                && $row->status === CateringAttendanceStatus::Libur)
-            ->count())->toBe(4);
+            ->filter(fn (CateringAttendance $row): bool => $row->status === CateringAttendanceStatus::Libur)
+            ->count())->toBe(2);
 });
 
 /*
 |--------------------------------------------------------------------------
-| Every delivery of an individual invoice shares one weekend rule
+ | Every delivery of an individual invoice shares one visibility rule
 |--------------------------------------------------------------------------
 |
 | The preview endpoint, the service and the bulk archive all print the same
@@ -1755,12 +1783,12 @@ it('leaves the weekend attendance rows stored while invoicing', function () {
  */
 function invoiceBilledDatesFromText(string $text): array
 {
-    preg_match_all('/(\d{2}\/\d{2}\/\d{4})\s+Ikut\s+Dihitung/', $text, $matches);
+    preg_match_all('/(\d{2}\/\d{2}\/\d{4})\s+Ikut\s+Rp/', $text, $matches);
 
     return $matches[1];
 }
 
-it('keeps the inline preview free of the october weekends', function () {
+it('applies libur-only visibility to the inline preview', function () {
     [$member, $schoolClass, $category] = octoberInvoiceFixture();
 
     $response = $this->actingAs(User::factory()->admin()->create())
@@ -1771,34 +1799,31 @@ it('keeps the inline preview free of the october weekends', function () {
     $bytes = $response->streamedContent();
     $text = invoicePdfText($bytes);
 
-    foreach (invoiceWeekendDates(2026, 10) as $weekend) {
-        expect($text)->not->toContain(invoiceDateLabel($weekend));
-    }
-
     expect(invoicePdfPageCount($bytes))->toBe(1)
         ->and(invoiceBilledDatesFromText($text))->toBe(['01/10/2026', '05/10/2026'])
-        ->and($text)->toContain('02/10/2026')
+        ->and($text)->not->toContain('02/10/2026 Libur')
+        ->and($text)->toContain('03/10/2026')
+        ->and($text)->toContain('04/10/2026')
         ->and($text)->toContain('06/10/2026')
+        ->and($text)->toContain('10/10/2026')
+        ->and($text)->not->toContain('11/10/2026')
         ->and($text)->toContain('2 hari')
         ->and($text)->toContain('Rp '.number_format(2 * $category->price_per_day, 0, ',', '.'));
 });
 
-it('keeps the service built individual pdf free of the october weekends', function () {
+it('applies libur-only visibility to the service built individual pdf', function () {
     [$member] = octoberInvoiceFixture();
 
     $invoice = invoiceService()->buildMemberInvoice($member, ...octoberPeriod());
     $text = invoicePdfText(invoiceService()->renderPdf($invoice));
 
-    foreach (invoiceWeekendDates(2026, 10) as $weekend) {
-        expect($text)->not->toContain(invoiceDateLabel($weekend));
-    }
-
     expect(array_column($invoice['attendanceRows'], 'date'))->toBe([
-        '01/10/2026', '02/10/2026', '05/10/2026', '06/10/2026', '07/10/2026', '08/10/2026', '09/10/2026',
-    ]);
+        '01/10/2026', '03/10/2026', '04/10/2026', '05/10/2026', '06/10/2026', '07/10/2026', '08/10/2026', '09/10/2026', '10/10/2026',
+    ])->and($text)->not->toContain('02/10/2026 Libur')
+        ->and($text)->not->toContain('11/10/2026 Libur');
 });
 
-it('keeps every pdf inside the class zip free of the october weekends', function () {
+it('keeps every pdf inside the class zip free of libur rows', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
     $members = CateringMember::factory()->count(3)->create([
@@ -1833,12 +1858,17 @@ it('keeps every pdf inside the class zip free of the october weekends', function
         }
 
         foreach (invoiceWeekdayDates(2026, 10) as $weekday) {
-            expect($text)->toContain(invoiceDateLabel($weekday));
+            if ($weekday === '2026-10-09') {
+                expect($text)->not->toContain(invoiceDateLabel($weekday));
+            } else {
+                expect($text)->toContain(invoiceDateLabel($weekday));
+            }
         }
 
         expect(invoicePdfPageCount($bytes))->toBe(1)
             ->and($text)->toContain('TOTAL TAGIHAN')
-            ->and($text)->toContain('09/10/2026 Libur Tidak dihitung - Rp 0')
+            ->and($text)->not->toContain('09/10/2026')
+            ->and($text)->not->toContain('KETERANGAN')
             ->and(invoiceBilledDatesFromText($text))->toHaveCount(21)
             ->and($text)->toContain('21 hari')
             ->and($text)->toContain('Rp '.number_format(21 * $category->price_per_day, 0, ',', '.'));

@@ -186,11 +186,18 @@
 
     {{-- CREATE/EDIT MODAL --}}
     @if ($showFormModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="member-modal-title">
-            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"></div>
+        <div
+            x-scroll-lock
+            x-on:keydown.escape.window="$wire.closeFormModal()"
+            class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="member-modal-title"
+        >
+            <div wire:click="closeFormModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
 
-            <div class="relative z-10 w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
                     <div>
                         <h3 id="member-modal-title" class="text-base font-semibold text-slate-900">{{ $editingId ? 'Edit Peserta' : 'Tambah Peserta' }}</h3>
                         <p class="mt-1 text-sm text-slate-500">Lengkapi data peserta dan pilihan catering.</p>
@@ -200,8 +207,8 @@
                     </button>
                 </div>
 
-                <form wire:submit="save">
-                    <div class="space-y-5 px-5 py-5 sm:px-6">
+                <form wire:submit="save" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
                         <div>
                             <label for="member-name" class="label">Nama Peserta</label>
                             <input id="member-name" type="text" wire:model="name" class="input" placeholder="Nama lengkap peserta" />
@@ -343,7 +350,7 @@
                         </label>
                     </div>
 
-                    <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
                         <button type="button" wire:click="closeFormModal" class="btn-secondary">Batal</button>
                         <button type="submit" wire:loading.attr="disabled" class="btn-primary">
                             <span wire:loading.remove wire:target="save">Simpan Perubahan</span>
@@ -357,11 +364,11 @@
 
     {{-- DELETE CONFIRMATION MODAL --}}
     @if ($showDeleteModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
-            <div class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"></div>
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeDeleteModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+            <div wire:click="closeDeleteModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
 
-            <div class="relative z-10 w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
                     <div>
                         <h3 id="delete-modal-title" class="text-base font-semibold text-slate-900">
                             {{ $isBulkDelete ? 'Hapus '.$deletingMemberCount.' Peserta?' : 'Hapus Peserta?' }}
@@ -373,7 +380,7 @@
                     </button>
                 </div>
 
-                <div class="px-5 py-4 sm:px-6">
+                <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
                     @if ($isBulkDelete)
                         <p class="text-sm text-slate-700">
                             Anda akan menghapus <strong>{{ $deletingMemberCount }} peserta</strong> beserta data absensi dan penempatan pegawai terkait.
@@ -388,7 +395,7 @@
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
                     <button type="button" wire:click="closeDeleteModal" class="btn-secondary">Batal</button>
                     <button type="button" wire:click="deleteConfirmed" wire:loading.attr="disabled"
                         wire:target="deleteConfirmed" class="btn-danger">

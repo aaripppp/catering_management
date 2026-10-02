@@ -1,8 +1,8 @@
 <div>
     @if ($open)
-        <div class="modal-backdrop items-start overflow-y-auto" wire:key="catering-member-modal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title">
-            <div class="modal-panel my-4 max-w-2xl sm:my-8">
-                <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.set('open', false)" wire:click.self="$set('open', false)" class="modal-backdrop" wire:key="catering-member-modal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title">
+            <div class="modal-panel max-w-2xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
                     <div>
                         <h3 id="member-modal-title" class="text-base font-semibold text-slate-900">{{ $cateringMemberId ? 'Ubah Peserta' : 'Tambah Peserta' }}</h3>
                         <p class="mt-1 text-sm text-slate-500">Lengkapi data peserta dan pilihan catering.</p>
@@ -12,8 +12,8 @@
                     </button>
                 </div>
 
-                <form wire:submit="save">
-                    <div class="space-y-5 px-5 py-5 sm:px-6">
+                <form wire:submit="save" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
                         <div>
                             <label for="member-name" class="label">Nama Peserta</label>
                             <input id="member-name" type="text" wire:model="name" class="input" placeholder="Nama lengkap peserta" />
@@ -89,7 +89,7 @@
                         </label>
                     </div>
 
-                    <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
                         <button type="button" wire:click="$set('open', false)" class="btn-secondary">Batal</button>
                         <button type="submit" wire:loading.attr="disabled" class="btn-primary">
                             <span wire:loading.remove wire:target="save">Simpan</span>
