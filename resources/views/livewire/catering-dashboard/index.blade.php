@@ -1,3 +1,5 @@
+@use(App\Enums\CateringAttendanceStatus)
+
 <div class="space-y-5" wire:poll.15s="pollRecap">
 
     {{-- Toolbar: selected date, badge, quick actions and date picker --}}
@@ -80,7 +82,7 @@
             <div class="card-body flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Total Keseluruhan</p>
-                    <p class="mt-1 text-sm text-slate-500">Total porsi dari status <strong>Ikut</strong> pada {{ $recap['dateLabel'] }}</p>
+                    <p class="mt-1 text-sm text-slate-500">Total porsi dari status <strong>{{ CateringAttendanceStatus::Ikut->label() }}</strong> pada {{ $recap['dateLabel'] }}</p>
                 </div>
                 <div class="flex items-baseline gap-2 sm:text-right">
                     <span class="text-5xl font-bold leading-none tracking-tight text-slate-900">{{ number_format($recap['totalPortions'], 0, ',', '.') }}</span>
@@ -99,7 +101,7 @@
                         0 Porsi · {{ $recap['liburRows'] === $recap['savedRows'] ? 'Libur / tidak ada catering' : 'Tidak ada peserta yang ikut' }}
                     </p>
                     <p class="mt-0.5 text-xs">
-                        {{ number_format($recap['tidakIkutRows'], 0, ',', '.') }} baris Tidak Ikut &middot;
+                        {{ number_format($recap['tidakIkutRows'], 0, ',', '.') }} baris {{ CateringAttendanceStatus::TidakIkut->label() }} &middot;
                         {{ number_format($recap['liburRows'], 0, ',', '.') }} baris Libur.
                     </p>
                 </div>

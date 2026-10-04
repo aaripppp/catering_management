@@ -648,7 +648,7 @@ it('reports tidak ikut separately on a zero portion dashboard day', function () 
 
     recapOn(RECAP_DATE)
         ->assertSee('0 Porsi · Tidak ada peserta yang ikut')
-        ->assertSee('1 baris Tidak Ikut')
+        ->assertSee('1 baris Off')
         ->assertDontSee('0 Porsi · Libur / tidak ada catering');
 });
 

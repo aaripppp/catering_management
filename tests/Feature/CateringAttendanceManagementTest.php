@@ -230,21 +230,31 @@ it('updates an existing cell without creating a duplicate row', function () {
     expect(attendanceStatusOn($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::TidakIkut);
 });
 
-it('does not change attendance belonging to another class', function () {
+it('limits a whole date change to active participants in the loaded class and group', function () {
     $selectedClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $otherClass = SchoolClass::factory()->create(['name' => '7B', 'level' => '7']);
-    CateringMember::factory()->create(['school_class_id' => $selectedClass->id]);
+    $selectedMember = CateringMember::factory()->create(['school_class_id' => $selectedClass->id]);
     $otherMember = CateringMember::factory()->create(['school_class_id' => $otherClass->id]);
-    $otherAttendance = CateringAttendance::factory()->for($otherMember)->create([
-        'attendance_date' => '2026-09-01',
-        'status' => CateringAttendanceStatus::Alfa,
+    $inactiveMember = CateringMember::factory()->inactive()->create(['school_class_id' => $selectedClass->id]);
+    $employee = CateringMember::factory()->withoutClass()->create([
+        'catering_category_id' => CateringCategory::factory()->employee()->create()->id,
     ]);
 
+    foreach ([$otherMember, $inactiveMember, $employee] as $excludedMember) {
+        CateringAttendance::factory()->for($excludedMember)->create([
+            'attendance_date' => '2026-09-01',
+            'status' => CateringAttendanceStatus::Alfa,
+        ]);
+    }
+
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $selectedClass)
-        ->call('setDateStatus', '2026-09-01', 'libur')
+        ->call('setDateStatus', '2026-09-01', 'izin')
         ->assertHasNoErrors();
 
-    expect($otherAttendance->fresh()->status)->toBe(CateringAttendanceStatus::Alfa);
+    expect(attendanceStatusOn($selectedMember->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Izin)
+        ->and(attendanceStatusOn($otherMember->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Alfa)
+        ->and(attendanceStatusOn($inactiveMember->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Alfa)
+        ->and(attendanceStatusOn($employee->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Alfa);
 });
 
 it('does not change attendance belonging to another month', function () {
@@ -292,15 +302,29 @@ it('reloads all previously saved statuses for the same class and month', functio
         ->assertSet("attendance.{$member->id}.2026-09-04", 'tidak_ikut');
 });
 
-it('renders tidak ikut in the attendance modal with violet styling', function () {
+it('renders active and off in the attendance modal with the existing colors', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('openStatusMenu', $member->id, '2026-09-01')
-        ->assertSee('Tidak Ikut')
+        ->assertSee('Aktif')
+        ->assertSee('Off')
+        ->assertDontSee('Tidak Ikut')
+        ->assertSeeHtml('<span class="text-base font-bold">O</span>')
         ->assertSeeHtml('border-violet-800 bg-violet-600 text-white hover:bg-violet-700 focus-visible:ring-violet-300')
         ->assertSeeHtml('scale-[1.03] shadow-md ring-4 ring-emerald-300 ring-offset-2');
+});
+
+it('uses active and off labels in attendance matrix cell descriptions', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create(['name' => 'Siswa Label', 'school_class_id' => $schoolClass->id]);
+    $component = openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass);
+
+    $component
+        ->assertSeeHtml('title="Siswa Label - 2026-09-01: Aktif"')
+        ->call('setCellStatus', $member->id, '2026-09-01', 'tidak_ikut')
+        ->assertSeeHtml('title="Siswa Label - 2026-09-01: Off"');
 });
 
 it('renders the manual non-billable statuses with distinct high contrast styling', function () {
@@ -315,6 +339,26 @@ it('renders the manual non-billable statuses with distinct high contrast styling
         ->assertSeeHtml('border-cyan-700 bg-cyan-500 text-white hover:bg-cyan-600 focus-visible:ring-cyan-300')
         ->assertSeeHtml('border-fuchsia-800 bg-fuchsia-600 text-white hover:bg-fuchsia-700 focus-visible:ring-fuchsia-300')
         ->assertSeeHtml('border-indigo-800 bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-300');
+});
+
+it('renders a compact whole date picker with every bulk status', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+
+    openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
+        ->assertSee('Ubah status seluruh peserta tanggal 1 September 2026')
+        ->assertSee('Semua peserta')
+        ->assertSee('Aktif')
+        ->assertSee('Sakit')
+        ->assertSee('Izin')
+        ->assertSee('Alfa')
+        ->assertSee('Off')
+        ->assertSee('Ujian')
+        ->assertSee('Event Unit')
+        ->assertSee('Puasa')
+        ->assertSee('Libur')
+        ->assertSeeHtml('<span class="text-sm font-bold">O</span>')
+        ->assertDontSeeHtml('<span class="text-sm font-bold">T</span>');
 });
 
 it('requires a participant group before a matrix can be loaded', function () {

@@ -1,10 +1,53 @@
 <div
     class="space-y-5"
     x-data="{
+        bulkDate: null,
+        bulkDateLabel: '',
+        bulkPickerStyle: '',
+        bulkTrigger: null,
         changeFilter(filter, element) {
             $wire.changeFilter(filter, element.value);
+        },
+        openBulkStatusPicker(date, label, event) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const width = Math.min(240, window.innerWidth - 16);
+            const estimatedHeight = 230;
+            const left = Math.min(
+                Math.max(8, rect.left + (rect.width / 2) - (width / 2)),
+                window.innerWidth - width - 8,
+            );
+            const top = rect.bottom + estimatedHeight + 8 <= window.innerHeight
+                ? rect.bottom + 6
+                : Math.max(8, rect.top - estimatedHeight - 6);
+
+            this.bulkDate = date;
+            this.bulkDateLabel = label;
+            this.bulkTrigger = event.currentTarget;
+            this.bulkPickerStyle = `left: ${left}px; top: ${top}px; width: ${width}px;`;
+            this.$nextTick(() => this.$refs.bulkStatusPicker?.querySelector('button')?.focus());
+        },
+        closeBulkStatusPicker(returnFocus = false) {
+            const trigger = this.bulkTrigger;
+
+            this.bulkDate = null;
+
+            if (returnFocus) {
+                this.$nextTick(() => trigger?.focus());
+            }
+        },
+        applyBulkStatus(status) {
+            const date = this.bulkDate;
+
+            if (! date) {
+                return;
+            }
+
+            this.closeBulkStatusPicker();
+            this.$wire.setDateStatus(date, status);
         }
     }"
+    x-on:resize.window="closeBulkStatusPicker()"
+    x-on:keydown.escape.window="closeBulkStatusPicker(true)"
 >
     @php
         $statusLabels = collect($statusOptions)->mapWithKeys(fn ($status) => [$status->value => $status->label()]);
@@ -142,11 +185,11 @@
         <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             @foreach ([
                 ['label' => 'Jumlah Peserta', 'value' => $summary['participants'], 'class' => 'text-slate-900'],
-                ['label' => 'Ikut', 'value' => $summary['ikut'], 'class' => 'text-emerald-700'],
+                ['label' => $statusLabels['ikut'], 'value' => $summary['ikut'], 'class' => 'text-emerald-700'],
                 ['label' => 'Sakit', 'value' => $summary['sakit'], 'class' => 'text-amber-700'],
                 ['label' => 'Izin', 'value' => $summary['izin'], 'class' => 'text-blue-700'],
                 ['label' => 'Alfa', 'value' => $summary['alfa'], 'class' => 'text-red-700'],
-                ['label' => 'Tidak Ikut', 'value' => $summary['tidak_ikut'], 'class' => 'text-violet-800'],
+                ['label' => $statusLabels['tidak_ikut'], 'value' => $summary['tidak_ikut'], 'class' => 'text-violet-800'],
                 ['label' => 'Ujian', 'value' => $summary['ujian'], 'class' => 'text-cyan-700'],
                 ['label' => 'Event Unit', 'value' => $summary['event_unit'], 'class' => 'text-fuchsia-700'],
                 ['label' => 'Puasa', 'value' => $summary['puasa'], 'class' => 'text-indigo-700'],
@@ -246,7 +289,7 @@
                     </div>
                 </div>
 
-                <div class="max-h-[68vh] overflow-auto">
+                <div class="max-h-[68vh] overflow-auto" x-on:scroll="closeBulkStatusPicker()">
                     <table class="min-w-max border-separate border-spacing-0 text-xs">
                         <thead>
                             <tr>
@@ -268,19 +311,21 @@
                                         <span class="block text-sm text-slate-800">{{ $date['day'] }}</span>
                                         <span class="block text-[10px] font-medium">{{ $date['weekday'] }}</span>
 
-                                        @if ($date['isWeekend'])
-                                            <span class="mt-1 inline-flex h-5 items-center text-[9px] font-bold text-slate-400">L</span>
-                                        @else
-                                            <button
-                                                type="button"
-                                                wire:click="setDateStatus('{{ $date['date'] }}', '{{ $wholeDateLibur[$date['date']] ? 'ikut' : 'libur' }}')"
-                                                wire:loading.attr="disabled"
-                                                class="mt-1 inline-flex h-5 items-center rounded px-1 text-[9px] font-bold text-blue-600 transition hover:bg-blue-100"
-                                                title="{{ $wholeDateLibur[$date['date']] ? 'Kembalikan seluruh peserta ke Ikut' : 'Tandai seluruh peserta Libur' }}"
-                                            >
-                                                {{ $wholeDateLibur[$date['date']] ? '✓' : 'L' }}
-                                            </button>
-                                        @endif
+                                        <button
+                                            type="button"
+                                            x-on:click="openBulkStatusPicker(@js($date['date']), @js($date['day'].' '.$monthOptions[$month].' '.$year), $event)"
+                                            x-bind:aria-expanded="bulkDate === @js($date['date'])"
+                                            wire:loading.attr="disabled"
+                                            class="mx-auto mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-blue-600 transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                            title="Ubah status seluruh peserta tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
+                                            aria-label="Ubah status seluruh peserta tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
+                                            aria-haspopup="menu"
+                                            aria-controls="bulk-attendance-status-picker"
+                                        >
+                                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                                <path stroke-linecap="round" d="M5 7h14M5 12h14M5 17h14" />
+                                            </svg>
+                                        </button>
                                     </th>
                                 @endforeach
                                 <th class="sticky right-0 top-0 z-30 w-32 min-w-32 border-b border-l border-slate-200 bg-slate-50 px-3 py-3 text-center font-semibold uppercase tracking-wide text-slate-500 shadow-[-2px_0_0_0_rgb(226_232_240)]">
@@ -346,6 +391,38 @@
                     </table>
                 </div>
             </section>
+
+            <template x-teleport="body">
+                <div
+                    x-cloak
+                    x-show="bulkDate"
+                    x-ref="bulkStatusPicker"
+                    x-bind:style="bulkPickerStyle"
+                    x-on:click.outside="closeBulkStatusPicker()"
+                    x-transition.opacity.duration.100ms
+                    id="bulk-attendance-status-picker"
+                    class="fixed z-[60] rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+                    role="menu"
+                    aria-label="Pilih status untuk seluruh peserta"
+                >
+                    <p class="mb-2 truncate px-1 text-xs font-semibold text-slate-700">
+                        Semua peserta &middot; <span x-text="bulkDateLabel"></span>
+                    </p>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        @foreach ($statusOptions as $status)
+                            <button
+                                type="button"
+                                x-on:click="applyBulkStatus(@js($status->value))"
+                                class="flex min-h-12 flex-col items-center justify-center rounded-lg border-2 px-1 py-1.5 text-[10px] font-semibold leading-tight shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-1 {{ $statusClasses[$status->value] }}"
+                                role="menuitem"
+                            >
+                                <span class="text-sm font-bold">{{ $status->shorthand() }}</span>
+                                <span>{{ $statusLabels[$status->value] }}</span>
+                            </button>
+                        @endforeach
+                    </div>
+                </div>
+            </template>
         @endif
     @endif
 

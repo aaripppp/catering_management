@@ -245,10 +245,7 @@ class Index extends Component
 
         $validated = Validator::make(
             ['status' => $status],
-            ['status' => ['required', Rule::in([
-                CateringAttendanceStatus::Ikut->value,
-                CateringAttendanceStatus::Libur->value,
-            ])]],
+            ['status' => ['required', Rule::enum(CateringAttendanceStatus::class)]],
         )->validate();
 
         if (! in_array($date, array_column($this->dates, 'date'), true)) {
@@ -389,7 +386,6 @@ class Index extends Component
             'requiresClassSelection' => $selectedGroup?->requiresClassSelection() ?? false,
             'statusOptions' => CateringAttendanceStatus::cases(),
             'summary' => $this->summary(),
-            'wholeDateLibur' => $this->wholeDateLibur(),
         ]);
     }
 
@@ -757,24 +753,5 @@ class Index extends Component
         }
 
         return $summary;
-    }
-
-    /** @return array<string, bool> */
-    private function wholeDateLibur(): array
-    {
-        $wholeDateLibur = [];
-
-        foreach ($this->dates as $date) {
-            $wholeDateLibur[$date['date']] = $this->participants !== [];
-
-            foreach ($this->participants as $participant) {
-                if (($this->attendance[$participant['id']][$date['date']] ?? null) !== CateringAttendanceStatus::Libur->value) {
-                    $wholeDateLibur[$date['date']] = false;
-                    break;
-                }
-            }
-        }
-
-        return $wholeDateLibur;
     }
 }

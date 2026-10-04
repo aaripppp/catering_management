@@ -433,18 +433,18 @@ it('rejects a cell change from a guest', function () {
 |--------------------------------------------------------------------------
 */
 
-it('persists a whole date change for every participant in the context', function () {
+it('persists every supported whole date status for every participant in the context', function (CateringAttendanceStatus $status) {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
 
     autoSaveMatrix($schoolClass)
-        ->call('setDateStatus', '2026-09-01', 'libur')
+        ->call('setDateStatus', '2026-09-01', $status->value)
         ->assertHasNoErrors();
 
     foreach ($members as $member) {
-        expect(storedStatus($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Libur);
+        expect(storedStatus($member->id, '2026-09-01'))->toBe($status);
     }
-});
+})->with(CateringAttendanceStatus::cases());
 
 it('leaves the neighbouring dates untouched when a whole date changes', function () {
     $schoolClass = autoSaveClass();
@@ -481,15 +481,29 @@ it('rejects a date that is outside the loaded matrix', function () {
     expect(storedStatus($member->id, '2026-11-11'))->toBeNull();
 });
 
-it('rejects a whole date status that is not ikut or libur', function () {
+it('rejects an unknown whole date status', function () {
     $schoolClass = autoSaveClass();
     $member = autoSaveMember($schoolClass);
 
     autoSaveMatrix($schoolClass)
-        ->call('setDateStatus', '2026-09-01', 'sakit')
+        ->call('setDateStatus', '2026-09-01', 'hadir-sebagian')
         ->assertHasErrors(['status']);
 
     expect(storedStatus($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Ikut);
+});
+
+it('allows an individual cell to override a whole date status', function () {
+    $schoolClass = autoSaveClass();
+    $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
+    $component = autoSaveMatrix($schoolClass);
+
+    $component
+        ->call('setDateStatus', '2026-09-01', 'puasa')
+        ->call('setCellStatus', $members->first()->id, '2026-09-01', 'sakit')
+        ->assertHasNoErrors();
+
+    expect(storedStatus($members->first()->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Sakit)
+        ->and(storedStatus($members->last()->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Puasa);
 });
 
 /*

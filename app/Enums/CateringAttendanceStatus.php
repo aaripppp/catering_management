@@ -17,11 +17,11 @@ enum CateringAttendanceStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Ikut => 'Ikut',
+            self::Ikut => 'Aktif',
             self::Sakit => 'Sakit',
             self::Izin => 'Izin',
             self::Alfa => 'Alfa',
-            self::TidakIkut => 'Tidak Ikut',
+            self::TidakIkut => 'Off',
             self::Ujian => 'Ujian',
             self::EventUnit => 'Event Unit',
             self::Puasa => 'Puasa',
@@ -36,7 +36,7 @@ enum CateringAttendanceStatus: string
             self::Sakit => 'S',
             self::Izin => 'I',
             self::Alfa => 'A',
-            self::TidakIkut => 'T',
+            self::TidakIkut => 'O',
             self::Ujian => 'U',
             self::EventUnit => 'E',
             self::Puasa => 'P',

@@ -5,10 +5,13 @@ use App\Models\CateringAttendance;
 use App\Models\CateringMember;
 use Illuminate\Database\QueryException;
 
-it('defines the tidak ikut attendance status', function () {
-    expect(CateringAttendanceStatus::TidakIkut->value)->toBe('tidak_ikut')
-        ->and(CateringAttendanceStatus::TidakIkut->label())->toBe('Tidak Ikut')
-        ->and(CateringAttendanceStatus::TidakIkut->shorthand())->toBe('T');
+it('uses active and off display labels without changing stored status values', function () {
+    expect(CateringAttendanceStatus::Ikut->value)->toBe('ikut')
+        ->and(CateringAttendanceStatus::Ikut->label())->toBe('Aktif')
+        ->and(CateringAttendanceStatus::Ikut->shorthand())->toBe('✓')
+        ->and(CateringAttendanceStatus::TidakIkut->value)->toBe('tidak_ikut')
+        ->and(CateringAttendanceStatus::TidakIkut->label())->toBe('Off')
+        ->and(CateringAttendanceStatus::TidakIkut->shorthand())->toBe('O');
 });
 
 it('defines the manual non-billable attendance statuses', function (CateringAttendanceStatus $status, string $value, string $label, string $shorthand) {

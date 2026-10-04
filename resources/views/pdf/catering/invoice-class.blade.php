@@ -292,16 +292,16 @@
         <tr>
             <th class="num" style="width: 3%;">No</th>
             <th style="width: 18%;">Nama Siswa</th>
-            <th class="num" style="width: 5%;">Ikut</th>
+            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
             <th class="num" style="width: 5%;">Sakit</th>
             <th class="num" style="width: 5%;">Izin</th>
             <th class="num" style="width: 5%;">Alfa</th>
-            <th class="num" style="width: 5%;">Tdk Ikut</th>
+            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
             <th class="num" style="width: 5%;">Ujian</th>
             <th class="num" style="width: 6%;">Event</th>
             <th class="num" style="width: 5%;">Puasa</th>
             <th class="num" style="width: 5%;">Libur</th>
-            <th class="right nowrap" style="width: 15%;">Harga / Ikut</th>
+            <th class="right nowrap" style="width: 15%;">Harga / {{ CateringAttendanceStatus::Ikut->label() }}</th>
             <th class="right nowrap" style="width: 18%;">Total</th>
         </tr>
     </thead>
