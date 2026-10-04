@@ -186,6 +186,8 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $printedWeekends = 0;
     $directUjianRows = 0;
     $directLiburRows = 0;
+    $directPaymentSections = 0;
+    $directConfirmations = 0;
 
     foreach ($members as $member) {
         $invoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
@@ -195,6 +197,13 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         $text = artifactPdfText($bytes);
         $directUjianRows += str_contains($text, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
         $directLiburRows += str_contains($text, '09/10/2026 Libur') ? 1 : 0;
+        $directPaymentSections += str_contains($text, 'PEMBAYARAN')
+            && str_contains($text, 'BCA')
+            && str_contains($text, '5222129702')
+            && str_contains($text, 'Rara Nurfatimah')
+            && str_contains($text, '0813-9994-7699') ? 1 : 0;
+        $directConfirmations += ! str_contains($invoice['confirmationReference'], 'INV/')
+            && str_contains($text, $invoice['confirmationReference']) ? 1 : 0;
 
         $dates = array_column($invoice['attendanceRows'], 'date');
         $printedWeekends += count(array_filter(
@@ -219,6 +228,7 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $classFilename = $service->classPdfFilename($classInvoice);
     $classBytes = $service->renderClassPdf($classInvoice);
     file_put_contents($outputDir.'/'.$classFilename, $classBytes);
+    $classText = artifactPdfText($classBytes);
 
     $bulk = $service->buildBulkInvoices(CateringParticipantGroup::Student, $schoolClass, $start, $end);
     $zipResponse = $service->bulkZipResponse($bulk, $schoolClass->name, $start);
@@ -245,13 +255,26 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $archive->open($outputDir.'/'.$zipName);
     $zipUjianRows = 0;
     $zipLiburRows = 0;
+    $zipPaymentSections = 0;
+    $zipConfirmations = 0;
 
     for ($index = 0; $index < $archive->numFiles; $index++) {
         $entryName = $archive->getNameIndex($index);
         $entryBytes = $archive->getFromIndex($index);
         $entryText = $entryBytes === false ? '' : artifactPdfText($entryBytes);
+        $zipInvoice = collect($bulk)->first(
+            fn (array $invoice): bool => $service->individualPdfFilename($invoice) === $entryName,
+        );
         $zipUjianRows += str_contains($entryText, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
         $zipLiburRows += str_contains($entryText, '09/10/2026 Libur') ? 1 : 0;
+        $zipPaymentSections += str_contains($entryText, 'PEMBAYARAN')
+            && str_contains($entryText, 'BCA')
+            && str_contains($entryText, '5222129702')
+            && str_contains($entryText, 'Rara Nurfatimah')
+            && str_contains($entryText, '0813-9994-7699') ? 1 : 0;
+        $zipConfirmations += $zipInvoice !== null
+            && ! str_contains($zipInvoice['confirmationReference'], 'INV/')
+            && str_contains($entryText, $zipInvoice['confirmationReference']) ? 1 : 0;
         $zipReport[] = sprintf('   entry %-48s %8d B', $entryName, $archive->statIndex($index)['size']);
     }
 
@@ -277,8 +300,21 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         ->and($bulkWeekendRows)->toBe(2)
         ->and($directUjianRows)->toBe(2)
         ->and($directLiburRows)->toBe(0)
+        ->and($directPaymentSections)->toBe(2)
+        ->and($directConfirmations)->toBe(2)
         ->and($zipUjianRows)->toBe(2)
         ->and($zipLiburRows)->toBe(0)
+        ->and($zipPaymentSections)->toBe(2)
+        ->and($zipConfirmations)->toBe(2)
+        ->and($classText)->toContain('PEMBAYARAN')
+        ->and($classText)->toContain('KONFIRMASI PEMBAYARAN')
+        ->and($classText)->toContain('BCA')
+        ->and($classText)->toContain('5222129702')
+        ->and($classText)->toContain('Rara Nurfatimah')
+        ->and($classText)->toContain('0813-9994-7699')
+        ->and($classInvoice['confirmationReference'])->not->toContain('INV/')
+        ->and($classText)->toContain($classInvoice['confirmationReference'])
+        ->and($classText)->toContain('SUDAH TRANSFER')
         ->and(CateringAttendance::query()->count())->toBe($persisted)
         ->and($classInvoice['totalUjian'])->toBe(2)
         ->and($classInvoice['totalLibur'])->toBe(0);

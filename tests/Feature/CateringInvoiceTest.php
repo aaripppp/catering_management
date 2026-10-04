@@ -951,9 +951,42 @@ it('summarises every status count in the individual invoice', function () {
         ->and($text)->toContain('TOTAL TAGIHAN')
         ->and($text)->toContain('Rp 136.000')
         ->and($text)->not->toContain('Nasi Ayam')
-        ->and($text)->not->toContain('Nasi Telur')
-        ->and($text)->not->toContain('Transfer')
-        ->and($text)->not->toContain('Transfer bank');
+        ->and($text)->not->toContain('Nasi Telur');
+});
+
+it('renders official payment and dynamic confirmation details on an individual invoice', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['price_per_day' => 17000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 2, ujian: 1, eventUnit: 1, puasa: 1, libur: 1);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        ...invoicePeriod(),
+    );
+    $text = invoicePdfText(invoiceService()->renderPdf($invoice));
+
+    expect($invoice['total'])->toBe(34000)
+        ->and($invoice['quantity'])->toBe(2)
+        ->and($invoice['confirmationReference'])->toBe('AHMAD ZAKI - 7A - SUDAH TRANSFER')
+        ->not->toContain('INV/')
+        ->and($text)->toContain('PEMBAYARAN')
+        ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
+        ->and($text)->toContain('BCA')
+        ->and($text)->toContain('5222129702')
+        ->and($text)->toContain('Rara Nurfatimah')
+        ->and($text)->toContain('0813-9994-7699')
+        ->and($text)->toContain('AHMAD ZAKI - 7A - SUDAH TRANSFER')
+        ->and($text)->toContain('INV/CAF/09/2026/'.$member->id)
+        ->and($text)->toContain('Ujian')
+        ->and($text)->toContain('Event Unit')
+        ->and($text)->toContain('Puasa')
+        ->and($text)->not->toContain('KETERANGAN')
+        ->and($text)->not->toContain('08/09/2026 Libur');
 });
 
 it('shows guardian, invoice number and period identity in the individual invoice', function () {
@@ -1037,6 +1070,31 @@ it('includes only the selected class participants in the class summary pdf', fun
         ->and($text)->toContain('Ahmad Zaki')
         ->and($text)->not->toContain('Budi Luar Kelas')
         ->and($text)->toContain('INV/CAF/09/2026/CLASS-'.$selectedClass->id);
+});
+
+it('renders official payment and class confirmation details on the class invoice', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 3);
+
+    $invoice = invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
+    $text = invoicePdfText(invoiceService()->renderClassPdf($invoice));
+
+    expect($invoice['confirmationReference'])->toBe('7A - SEPTEMBER 2026 - SUDAH TRANSFER')
+        ->not->toContain('INV/');
+
+    expect($text)->toContain('PEMBAYARAN')
+        ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
+        ->and($text)->toContain('BCA')
+        ->and($text)->toContain('5222129702')
+        ->and($text)->toContain('Rara Nurfatimah')
+        ->and($text)->toContain('0813-9994-7699')
+        ->and($text)->toContain('7A - SEPTEMBER 2026 - SUDAH TRANSFER')
+        ->and($text)->toContain('INV/CAF/09/2026/CLASS-'.$schoolClass->id)
+        ->and($text)->not->toContain('AHMAD ZAKI - 7A - SUDAH TRANSFER');
 });
 
 it('reports per status counts and the participant total in the class summary', function () {
@@ -1512,9 +1570,17 @@ it('keeps bulk zip entries on the same one page layout', function () {
 
     foreach ($entries as $entry) {
         $pdf = invoiceZipEntryContent($zip, $entry);
+        $text = invoicePdfText($pdf);
 
         expect(invoicePdfPageCount($pdf))->toBe(1)
-            ->and(invoicePdfText($pdf))->toContain('TOTAL TAGIHAN');
+            ->and($text)->toContain('TOTAL TAGIHAN')
+            ->and($text)->toContain('PEMBAYARAN')
+            ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
+            ->and($text)->toContain('BCA')
+            ->and($text)->toContain('5222129702')
+            ->and($text)->toContain('Rara Nurfatimah')
+            ->and($text)->toContain('0813-9994-7699')
+            ->and($text)->toContain('SUDAH TRANSFER');
     }
 });
 
@@ -1712,7 +1778,7 @@ it('prints only the working days of a fully initialised october', function () {
         ->and(invoicePdfPageCount($bytes))->toBe(1);
 
     foreach (invoiceWeekendDates(2026, 10) as $weekend) {
-        expect($text)->not->toContain(invoiceDateLabel($weekend));
+        expect($text)->not->toContain(invoiceDateLabel($weekend).' Libur');
     }
 });
 
@@ -1854,7 +1920,7 @@ it('keeps every pdf inside the class zip free of libur rows', function () {
         $text = invoicePdfText($bytes);
 
         foreach (invoiceWeekendDates(2026, 10) as $weekend) {
-            expect($text)->not->toContain(invoiceDateLabel($weekend));
+            expect($text)->not->toContain(invoiceDateLabel($weekend).' Libur');
         }
 
         foreach (invoiceWeekdayDates(2026, 10) as $weekday) {
@@ -1909,6 +1975,8 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->and($entry)->toBe(invoiceService()->individualPdfFilename($invoice))
         ->and($printedDates)->toBe(array_column($invoice['attendanceRows'], 'date'))
         ->and(invoiceBilledDatesFromText($fromZip))->toBe(invoiceBilledDatesFromText($direct))
+        ->and($invoice['confirmationReference'])->not->toContain('INV/')
+        ->and($fromZip)->toContain($invoice['confirmationReference'])
         ->and($invoice['quantity'])->toBe(22)
         ->and($invoice['total'])->toBe(22 * $category->price_per_day)
         ->and($fromZip)->toContain('Rp '.number_format(22 * $category->price_per_day, 0, ',', '.'));

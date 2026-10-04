@@ -95,6 +95,7 @@ class CateringInvoiceService
             CateringAttendanceStatus::cases(),
         ), 0);
         $savedDays = 0;
+        $invoiceNumber = $this->classInvoiceNumber($schoolClass, $start);
 
         foreach ($members as $member) {
             $memberRows = $rowsByMember[$member->id] ?? [];
@@ -133,7 +134,7 @@ class CateringInvoiceService
             'classId' => $schoolClass->id,
             'className' => $schoolClass->name,
             'level' => (string) $schoolClass->level,
-            'invoiceNumber' => $this->classInvoiceNumber($schoolClass, $start),
+            'invoiceNumber' => $invoiceNumber,
             'invoiceDate' => now()->format('d/m/Y'),
             'month' => $start->month,
             'year' => $start->year,
@@ -153,6 +154,13 @@ class CateringInvoiceService
             'totalEventUnit' => $totals[CateringAttendanceStatus::EventUnit->value],
             'totalPuasa' => $totals[CateringAttendanceStatus::Puasa->value],
             'totalLibur' => $totals[CateringAttendanceStatus::Libur->value],
+            'payment' => $this->paymentDetails(),
+            'confirmationReference' => sprintf(
+                '%s - %s %d - SUDAH TRANSFER',
+                mb_strtoupper($schoolClass->name),
+                mb_strtoupper(self::MONTH_NAMES[$start->month]),
+                $start->year,
+            ),
             'logoDataUri' => $this->logoDataUri(),
         ];
     }
@@ -443,13 +451,14 @@ class CateringInvoiceService
         $className = $usesClass ? ($member->schoolClass?->name ?? '-') : $group->label();
         $isEmployee = $group === CateringParticipantGroup::Employee;
         $total = $quantity * $pricePerDay;
+        $invoiceNumber = sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id);
 
         return [
             'memberId' => $member->id,
             'memberName' => $member->name,
             'guardianName' => $member->guardian_name,
             'guardianPhone' => $member->guardian_phone,
-            'invoiceNumber' => sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id),
+            'invoiceNumber' => $invoiceNumber,
             'invoiceDate' => now()->format('d/m/Y'),
             'month' => $start->month,
             'year' => $start->year,
@@ -481,8 +490,24 @@ class CateringInvoiceService
             'countEventUnit' => $counts[CateringAttendanceStatus::EventUnit->value],
             'countPuasa' => $counts[CateringAttendanceStatus::Puasa->value],
             'countLibur' => $counts[CateringAttendanceStatus::Libur->value],
+            'payment' => $this->paymentDetails(),
+            'confirmationReference' => sprintf(
+                '%s - %s - SUDAH TRANSFER',
+                mb_strtoupper($member->name),
+                mb_strtoupper($className),
+            ),
             'logoDataUri' => $this->logoDataUri(),
         ];
+    }
+
+    /**
+     * Official bank and payment-confirmation details shared by every invoice.
+     *
+     * @return array{bank: string, account_number: string, account_name: string, admin_whatsapp: string, admin_whatsapp_display: string}
+     */
+    private function paymentDetails(): array
+    {
+        return config('catering.payment');
     }
 
     /**

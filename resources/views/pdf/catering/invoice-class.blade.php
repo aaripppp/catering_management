@@ -153,6 +153,69 @@
             font-size: 11px;
         }
 
+        table.payment-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            page-break-inside: avoid;
+        }
+
+        table.payment-grid td.payment-card {
+            border: 1px solid #bfdbfe;
+            background: #f8fafc;
+            padding: 7px 9px;
+            vertical-align: top;
+        }
+
+        table.payment-grid td.payment-card + td.payment-card {
+            border-left: none;
+        }
+
+        .payment-title {
+            color: #1e40af;
+            font-size: 9px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .payment-row {
+            line-height: 1.4;
+        }
+
+        .payment-label {
+            display: inline-block;
+            width: 80px;
+            color: #64748b;
+        }
+
+        .payment-value {
+            color: #0f172a;
+            font-weight: bold;
+        }
+
+        .payment-prominent {
+            color: #166534;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 0.4px;
+        }
+
+        .payment-instruction,
+        .confirmation-format {
+            color: #475569;
+            font-size: 8px;
+            line-height: 1.35;
+            margin-top: 4px;
+        }
+
+        .confirmation-reference {
+            color: #0f172a;
+            font-size: 8.5px;
+            font-weight: bold;
+            margin-top: 2px;
+        }
+
         .notes {
             margin-top: 16px;
             border-left: 3px solid #1e40af;
@@ -283,6 +346,25 @@
             </tr>
         </tfoot>
     @endif
+</table>
+
+<table class="payment-grid">
+    <tr>
+        <td class="payment-card" style="width: 42%;">
+            <div class="payment-title">PEMBAYARAN</div>
+            <div class="payment-row"><span class="payment-label">Bank</span><span class="payment-value">{{ $payment['bank'] }}</span></div>
+            <div class="payment-row"><span class="payment-label">No. Rekening</span><span class="payment-prominent">{{ $payment['account_number'] }}</span></div>
+            <div class="payment-row"><span class="payment-label">Atas Nama</span><span class="payment-value">{{ $payment['account_name'] }}</span></div>
+            <div class="payment-instruction">Setelah melakukan transfer, silakan kirimkan bukti transfer kepada Admin Catering.</div>
+        </td>
+        <td class="payment-card" style="width: 58%;">
+            <div class="payment-title">KONFIRMASI PEMBAYARAN</div>
+            <div class="payment-instruction">Silakan konfirmasi pembayaran melalui WhatsApp Admin Catering.</div>
+            <div class="payment-row"><span class="payment-label">WhatsApp</span><span class="payment-prominent">{{ $payment['admin_whatsapp_display'] }}</span></div>
+            <div class="confirmation-format">Format Konfirmasi:</div>
+            <div class="confirmation-reference">{{ $confirmationReference }}</div>
+        </td>
+    </tr>
 </table>
 
 <div class="notes">
