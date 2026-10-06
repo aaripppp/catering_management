@@ -917,7 +917,10 @@ it('bills only the ikut row in the individual invoice detail table', function ()
 
     expect($rows['02/09/2026']['status'])->toBe('Sakit')
         ->and($rows['03/09/2026']['status'])->toBe('Izin')
-        ->and($rows['04/09/2026']['status'])->toBe('Alfa')
+        ->and($rows['04/09/2026']['status'])->toBe('Budaya Makan')
+        ->and($rows['04/09/2026']['pricePerDayFormatted'])->toBe('-')
+        ->and($rows['04/09/2026']['subtotal'])->toBe(0)
+        ->and($rows['04/09/2026']['subtotalFormatted'])->toBe('Rp 0')
         ->and($rows['07/09/2026']['status'])->toBe('Off')
         ->and($rows['07/09/2026']['pricePerDayFormatted'])->toBe('-')
         ->and($rows['07/09/2026']['subtotal'])->toBe(0)
@@ -947,6 +950,8 @@ it('summarises every status count in the individual invoice', function () {
         ->and($invoice['countPuasa'])->toBe(1)
         ->and($invoice['countLibur'])->toBe(0)
         ->and($text)->toContain('REKAP ABSENSI')
+        ->and($text)->toContain('BUDAYA MAKAN')
+        ->and($text)->not->toContain('ALFA')
         ->and($text)->toContain('OFF')
         ->and($text)->not->toContain('TIDAK IKUT')
         ->and($text)->toContain('UJIAN')
@@ -1135,6 +1140,8 @@ it('reports per status counts and the participant total in the class summary', f
     expect($text)->toContain('NAMA SISWA')
         ->and($text)->toContain('HARGA / AKTIF')
         ->and($text)->toContain('TOTAL')
+        ->and($text)->toContain('BUDAYA MAKAN')
+        ->and($text)->not->toContain('ALFA')
         ->and($text)->toContain('OFF')
         ->and($text)->not->toContain('TDK IKUT')
         ->and($text)->toContain('UJIAN')
@@ -1455,7 +1462,8 @@ it('still shows every invoice-visible status on one page', function () {
     expect($text)->toContain('AKTIF')
         ->and($text)->toContain('SAKIT')
         ->and($text)->toContain('IZIN')
-        ->and($text)->toContain('ALFA')
+        ->and($text)->toContain('BUDAYA MAKAN')
+        ->and($text)->not->toContain('ALFA')
         ->and($text)->toContain('OFF')
         ->and($text)->not->toContain('TIDAK IKUT')
         ->and($text)->toContain('UJIAN')
@@ -1964,6 +1972,10 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->where('catering_member_id', $member->id)
         ->whereDate('attendance_date', '2026-10-05')
         ->update(['status' => CateringAttendanceStatus::TidakIkut->value]);
+    CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-10-06')
+        ->update(['status' => CateringAttendanceStatus::Alfa->value]);
 
     $invoice = invoiceService()->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), ...octoberPeriod());
 
@@ -1988,12 +2000,15 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->and(invoiceBilledDatesFromText($fromZip))->toBe(invoiceBilledDatesFromText($direct))
         ->and($direct)->toContain('Aktif')
         ->and($direct)->toContain('Off')
+        ->and($direct)->toContain('Budaya Makan')
         ->and($fromZip)->toContain('Aktif')
         ->and($fromZip)->toContain('Off')
+        ->and($fromZip)->toContain('Budaya Makan')
+        ->and($fromZip)->not->toContain('Alfa')
         ->and($fromZip)->not->toContain('Tidak Ikut')
         ->and($invoice['confirmationReference'])->not->toContain('INV/')
         ->and($fromZip)->toContain($invoice['confirmationReference'])
-        ->and($invoice['quantity'])->toBe(21)
-        ->and($invoice['total'])->toBe(21 * $category->price_per_day)
-        ->and($fromZip)->toContain('Rp '.number_format(21 * $category->price_per_day, 0, ',', '.'));
+        ->and($invoice['quantity'])->toBe(20)
+        ->and($invoice['total'])->toBe(20 * $category->price_per_day)
+        ->and($fromZip)->toContain('Rp '.number_format(20 * $category->price_per_day, 0, ',', '.'));
 });

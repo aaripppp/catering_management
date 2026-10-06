@@ -14,6 +14,27 @@ it('uses active and off display labels without changing stored status values', f
         ->and(CateringAttendanceStatus::TidakIkut->shorthand())->toBe('O');
 });
 
+it('uses budaya makan for the alfa display without changing its stored value', function () {
+    expect(CateringAttendanceStatus::Alfa->value)->toBe('alfa')
+        ->and(CateringAttendanceStatus::Alfa->label())->toBe('Budaya Makan')
+        ->and(CateringAttendanceStatus::Alfa->shorthand())->toBe('B');
+});
+
+it('loads an existing alfa database row through the unchanged enum value', function () {
+    $member = CateringMember::factory()->create();
+    $attendance = CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-09-01',
+        'status' => 'alfa',
+    ]);
+
+    expect($attendance->fresh()->status)->toBe(CateringAttendanceStatus::Alfa);
+
+    $this->assertDatabaseHas('catering_attendances', [
+        'id' => $attendance->id,
+        'status' => 'alfa',
+    ]);
+});
+
 it('defines the manual non-billable attendance statuses', function (CateringAttendanceStatus $status, string $value, string $label, string $shorthand) {
     expect($status->value)->toBe($value)
         ->and($status->label())->toBe($label)

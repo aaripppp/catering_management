@@ -166,6 +166,11 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
             ->whereDate('attendance_date', '2026-10-03')
             ->update(['status' => CateringAttendanceStatus::Ujian->value]);
 
+        CateringAttendance::query()
+            ->where('catering_member_id', $member->id)
+            ->whereDate('attendance_date', '2026-10-05')
+            ->update(['status' => CateringAttendanceStatus::Alfa->value]);
+
         if ($index === 1) {
             CateringAttendance::query()
                 ->where('catering_member_id', $member->id)
@@ -185,6 +190,7 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $persisted = CateringAttendance::query()->count();
     $printedWeekends = 0;
     $directUjianRows = 0;
+    $directBudayaMakanRows = 0;
     $directLiburRows = 0;
     $directPaymentSections = 0;
     $directConfirmations = 0;
@@ -196,6 +202,7 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         file_put_contents($outputDir.'/'.$filename, $bytes);
         $text = artifactPdfText($bytes);
         $directUjianRows += str_contains($text, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
+        $directBudayaMakanRows += str_contains($text, '05/10/2026 Budaya Makan - Rp 0') ? 1 : 0;
         $directLiburRows += str_contains($text, '09/10/2026 Libur') ? 1 : 0;
         $directPaymentSections += str_contains($text, 'PEMBAYARAN')
             && str_contains($text, 'BCA')
@@ -254,6 +261,7 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $archive = new ZipArchive;
     $archive->open($outputDir.'/'.$zipName);
     $zipUjianRows = 0;
+    $zipBudayaMakanRows = 0;
     $zipLiburRows = 0;
     $zipPaymentSections = 0;
     $zipConfirmations = 0;
@@ -266,6 +274,7 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
             fn (array $invoice): bool => $service->individualPdfFilename($invoice) === $entryName,
         );
         $zipUjianRows += str_contains($entryText, '03/10/2026 Ujian - Rp 0') ? 1 : 0;
+        $zipBudayaMakanRows += str_contains($entryText, '05/10/2026 Budaya Makan - Rp 0') ? 1 : 0;
         $zipLiburRows += str_contains($entryText, '09/10/2026 Libur') ? 1 : 0;
         $zipPaymentSections += str_contains($entryText, 'PEMBAYARAN')
             && str_contains($entryText, 'BCA')
@@ -299,15 +308,19 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     expect($printedWeekends)->toBe(2)
         ->and($bulkWeekendRows)->toBe(2)
         ->and($directUjianRows)->toBe(2)
+        ->and($directBudayaMakanRows)->toBe(2)
         ->and($directLiburRows)->toBe(0)
         ->and($directPaymentSections)->toBe(2)
         ->and($directConfirmations)->toBe(2)
         ->and($zipUjianRows)->toBe(2)
+        ->and($zipBudayaMakanRows)->toBe(2)
         ->and($zipLiburRows)->toBe(0)
         ->and($zipPaymentSections)->toBe(2)
         ->and($zipConfirmations)->toBe(2)
         ->and($classText)->toContain('PEMBAYARAN')
         ->and($classText)->toContain('KONFIRMASI PEMBAYARAN')
+        ->and($classText)->toContain('BUDAYA MAKAN')
+        ->and($classText)->not->toContain('ALFA')
         ->and($classText)->toContain('BCA')
         ->and($classText)->toContain('5222129702')
         ->and($classText)->toContain('Rara Nurfatimah')

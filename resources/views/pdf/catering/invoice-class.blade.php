@@ -295,7 +295,7 @@
             <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
             <th class="num" style="width: 5%;">Sakit</th>
             <th class="num" style="width: 5%;">Izin</th>
-            <th class="num" style="width: 5%;">Alfa</th>
+            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
             <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
             <th class="num" style="width: 5%;">Ujian</th>
             <th class="num" style="width: 6%;">Event</th>

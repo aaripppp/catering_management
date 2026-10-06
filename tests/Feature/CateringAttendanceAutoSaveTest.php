@@ -446,6 +446,24 @@ it('persists every supported whole date status for every participant in the cont
     }
 })->with(CateringAttendanceStatus::cases());
 
+it('saves the budaya makan bulk choice as alfa only in the loaded scope', function () {
+    $schoolClass = autoSaveClass();
+    $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
+    $otherClass = autoSaveClass('7B');
+    $outsideMember = autoSaveMember($otherClass, 'Siswa Luar Kelas');
+
+    autoSaveMatrix($schoolClass)
+        ->call('setDateStatus', '2026-09-01', CateringAttendanceStatus::Alfa->value)
+        ->assertHasNoErrors()
+        ->assertSet('saveState.saved', true);
+
+    foreach ($members as $member) {
+        expect(storedStatus($member->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Alfa);
+    }
+
+    expect(storedStatus($outsideMember->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Ikut);
+});
+
 it('leaves the neighbouring dates untouched when a whole date changes', function () {
     $schoolClass = autoSaveClass();
     $member = autoSaveMember($schoolClass);

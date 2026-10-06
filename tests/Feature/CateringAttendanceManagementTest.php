@@ -186,6 +186,19 @@ it('uses saved attendance instead of the weekday default', function (CateringAtt
     'saved puasa' => [CateringAttendanceStatus::Puasa],
 ]);
 
+it('renders a saved alfa row as budaya makan in the matrix', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create(['name' => 'Siswa Budaya', 'school_class_id' => $schoolClass->id]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-09-01',
+        'status' => 'alfa',
+    ]);
+
+    openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
+        ->assertSet("attendance.{$member->id}.2026-09-01", 'alfa')
+        ->assertSeeHtml('title="Siswa Budaya - 2026-09-01: Budaya Makan"');
+});
+
 it('marks and restores a whole weekday column', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
@@ -309,8 +322,12 @@ it('renders active and off in the attendance modal with the existing colors', fu
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('openStatusMenu', $member->id, '2026-09-01')
         ->assertSee('Aktif')
+        ->assertSee('Budaya Makan')
         ->assertSee('Off')
+        ->assertDontSee('Alfa')
         ->assertDontSee('Tidak Ikut')
+        ->assertSeeHtml('<span class="text-base font-bold">B</span>')
+        ->assertDontSeeHtml('<span class="text-base font-bold">A</span>')
         ->assertSeeHtml('<span class="text-base font-bold">O</span>')
         ->assertSeeHtml('border-violet-800 bg-violet-600 text-white hover:bg-violet-700 focus-visible:ring-violet-300')
         ->assertSeeHtml('scale-[1.03] shadow-md ring-4 ring-emerald-300 ring-offset-2');
@@ -351,12 +368,15 @@ it('renders a compact whole date picker with every bulk status', function () {
         ->assertSee('Aktif')
         ->assertSee('Sakit')
         ->assertSee('Izin')
-        ->assertSee('Alfa')
+        ->assertSee('Budaya Makan')
+        ->assertDontSee('Alfa')
         ->assertSee('Off')
         ->assertSee('Ujian')
         ->assertSee('Event Unit')
         ->assertSee('Puasa')
         ->assertSee('Libur')
+        ->assertSeeHtml('<span class="text-sm font-bold">B</span>')
+        ->assertDontSeeHtml('<span class="text-sm font-bold">A</span>')
         ->assertSeeHtml('<span class="text-sm font-bold">O</span>')
         ->assertDontSeeHtml('<span class="text-sm font-bold">T</span>');
 });

@@ -152,12 +152,14 @@ it('excludes izin from the portion total', function () {
     expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0);
 });
 
-it('excludes alfa from the portion total', function () {
+it('counts budaya makan as zero portions while preserving the alfa value', function () {
     $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
 
-    saveAttendance(recapStudent('Siswa Alfa', $class), RECAP_DATE, CateringAttendanceStatus::Alfa);
+    $student = recapStudent('Siswa Budaya Makan', $class);
+    saveAttendance($student, RECAP_DATE, CateringAttendanceStatus::Alfa);
 
-    expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0);
+    expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0)
+        ->and(recapStoredStatus($student, RECAP_DATE))->toBe(CateringAttendanceStatus::Alfa);
 });
 
 it('excludes tidak ikut from the portion total and counts it separately', function () {

@@ -188,7 +188,7 @@
                 ['label' => $statusLabels['ikut'], 'value' => $summary['ikut'], 'class' => 'text-emerald-700'],
                 ['label' => 'Sakit', 'value' => $summary['sakit'], 'class' => 'text-amber-700'],
                 ['label' => 'Izin', 'value' => $summary['izin'], 'class' => 'text-blue-700'],
-                ['label' => 'Alfa', 'value' => $summary['alfa'], 'class' => 'text-red-700'],
+                ['label' => $statusLabels['alfa'], 'value' => $summary['alfa'], 'class' => 'text-red-700'],
                 ['label' => $statusLabels['tidak_ikut'], 'value' => $summary['tidak_ikut'], 'class' => 'text-violet-800'],
                 ['label' => 'Ujian', 'value' => $summary['ujian'], 'class' => 'text-cyan-700'],
                 ['label' => 'Event Unit', 'value' => $summary['event_unit'], 'class' => 'text-fuchsia-700'],
