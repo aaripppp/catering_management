@@ -8,11 +8,11 @@
             <p class="mt-1 text-sm text-slate-500">Rekap tagihan dan pembayaran catering per periode.</p>
         </div>
         <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-            <button type="button" wire:click="downloadExcel" wire:loading.attr="disabled" wire:target="downloadExcel" class="btn-secondary">
+            <button type="button" wire:click="downloadExcel" wire:loading.attr="disabled" wire:target="downloadExcel" class="btn-secondary whitespace-nowrap">
                 <span wire:loading.remove wire:target="downloadExcel">Export Excel</span>
                 <span wire:loading wire:target="downloadExcel">Menyiapkan...</span>
             </button>
-            <a href="{{ $pdfPreviewUrl }}" target="_blank" rel="noopener" class="btn-primary">Preview PDF</a>
+            <a href="{{ $pdfPreviewUrl }}" target="_blank" rel="noopener" class="btn-primary whitespace-nowrap">Preview PDF</a>
         </div>
     </section>
 
@@ -106,21 +106,21 @@
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.25" /><path stroke-linecap="round" stroke-linejoin="round" d="m8.5 12 2.25 2.25 4.75-5" /></svg>
             </div>
             <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-emerald-700">Jumlah Lunas</p>
-            <p class="mt-1 text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['paid_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
+            <p class="mt-1 whitespace-nowrap text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['paid_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
         </div>
         <div class="card flex min-h-40 flex-col p-5">
             <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.25" /><path stroke-linecap="round" d="M12 7.5V12h4.5" /></svg>
             </div>
             <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-700">Jumlah Sebagian</p>
-            <p class="mt-1 text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['partial_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
+            <p class="mt-1 whitespace-nowrap text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['partial_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
         </div>
         <div class="card flex min-h-40 flex-col p-5">
             <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.25" /><path stroke-linecap="round" d="M8.5 12h7" /></svg>
             </div>
             <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Jumlah Belum Bayar</p>
-            <p class="mt-1 text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['unpaid_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
+            <p class="mt-1 whitespace-nowrap text-2xl font-bold tracking-tight text-slate-900">{{ number_format($summary['unpaid_count'], 0, ',', '.') }} <span class="text-base font-semibold text-slate-500">peserta</span></p>
         </div>
     </section>
 
@@ -148,7 +148,7 @@
         @elseif ($tab === 'summary')
             <div class="table-wrap">
                 <table class="table w-full">
-                    <thead><tr><th>Keterangan</th><th class="text-right">Jumlah</th></tr></thead>
+                    <thead class="whitespace-nowrap"><tr><th>Keterangan</th><th class="text-right">Jumlah</th></tr></thead>
                     <tbody>
                         @foreach ([
                             ['Total Tagihan', 'Rp '.number_format($summary['gross_amount'], 0, ',', '.')],
@@ -160,7 +160,7 @@
                             ['Sebagian', number_format($summary['partial_count'], 0, ',', '.').' peserta'],
                             ['Belum Bayar', number_format($summary['unpaid_count'], 0, ',', '.').' peserta'],
                         ] as [$label, $value])
-                            <tr><td class="font-medium text-slate-700">{{ $label }}</td><td class="text-right font-semibold text-slate-900">{{ $value }}</td></tr>
+                            <tr><td class="whitespace-nowrap font-medium text-slate-700">{{ $label }}</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">{{ $value }}</td></tr>
                         @endforeach
                     </tbody>
                 </table>
@@ -168,19 +168,19 @@
         @elseif ($tab === 'groups')
             <div class="table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="table w-full min-w-[1380px]">
-                        <thead><tr><th class="w-10 text-center">No</th><th>Kelas / Kelompok</th><th class="text-center">Peserta</th><th class="text-right">Total Tagihan</th><th class="text-right">Uang Masuk</th><th class="text-right">Kredit Digunakan</th><th class="text-right">Tunggakan</th><th class="text-right">Lebih Bayar</th><th class="text-center">Lunas</th><th class="text-center">Sebagian</th><th class="text-center">Belum Bayar</th></tr></thead>
+                    <table class="table w-full min-w-[1500px]">
+                        <thead class="whitespace-nowrap"><tr><th class="w-10 text-center">No</th><th>Kelas / Kelompok</th><th class="text-center">Peserta</th><th class="text-right">Total Tagihan</th><th class="text-right">Uang Masuk</th><th class="text-right">Kredit Digunakan</th><th class="text-right">Tunggakan</th><th class="text-right">Lebih Bayar</th><th class="text-center">Lunas</th><th class="text-center">Sebagian</th><th class="text-center">Belum Bayar</th></tr></thead>
                         <tbody>
                             @foreach ($groups as $index => $group)
                                 <tr wire:key="report-group-{{ $index }}-{{ $group['label'] }}">
                                     <td class="text-center text-sm text-slate-500">{{ $index + 1 }}</td>
-                                    <td class="font-semibold text-slate-900">{{ $group['label'] }}</td>
+                                    <td class="whitespace-nowrap font-semibold text-slate-900">{{ $group['label'] }}</td>
                                     <td class="text-center">{{ $group['participant_count'] }}</td>
-                                    <td class="text-right">Rp {{ number_format($group['gross_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-emerald-700">Rp {{ number_format($group['money_in'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-blue-700">Rp {{ number_format($group['credit_used'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-amber-700">Rp {{ number_format($group['outstanding_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-violet-700">Rp {{ number_format($group['overpayment_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right">Rp {{ number_format($group['gross_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-emerald-700">Rp {{ number_format($group['money_in'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-blue-700">Rp {{ number_format($group['credit_used'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-amber-700">Rp {{ number_format($group['outstanding_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-violet-700">Rp {{ number_format($group['overpayment_amount'], 0, ',', '.') }}</td>
                                     <td class="text-center">{{ $group['paid_count'] }}</td><td class="text-center">{{ $group['partial_count'] }}</td><td class="text-center">{{ $group['unpaid_count'] }}</td>
                                 </tr>
                             @endforeach
@@ -191,20 +191,21 @@
         @else
             <div class="table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="table w-full min-w-[1260px]">
-                        <thead><tr><th class="w-10 text-center">No</th><th>Peserta</th><th>Kelas / Kelompok</th><th>Kategori</th><th class="text-right">Tagihan</th><th class="text-right">Terbayar</th><th class="text-right">Kredit Dipakai</th><th class="text-right">Lebih Bayar</th><th class="text-right">Sisa</th><th>Status</th></tr></thead>
+                    <table class="table w-full min-w-[1380px]">
+                        <thead class="whitespace-nowrap"><tr><th class="w-10 text-center">No</th><th>Peserta</th><th>Kelas / Kelompok</th><th>Kategori</th><th class="text-right">Tagihan</th><th class="text-right">Terbayar</th><th class="text-right">Kredit Dipakai</th><th class="text-right">Lebih Bayar</th><th class="text-right">Sisa</th><th>Status</th></tr></thead>
                         <tbody>
                             @foreach ($details as $detail)
                                 <tr wire:key="report-detail-{{ $detail['id'] }}">
                                     <td class="text-center text-sm text-slate-500">{{ $details->firstItem() + $loop->index }}</td>
-                                    <td class="font-semibold text-slate-900">{{ $detail['member_name'] }}</td>
-                                    <td class="text-slate-600">{{ $detail['group_label'] }}</td><td class="text-slate-600">{{ $detail['category_name'] }}</td>
-                                    <td class="text-right font-semibold">Rp {{ number_format($detail['gross_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-emerald-700">Rp {{ number_format($detail['paid_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right text-blue-700">Rp {{ number_format($detail['credit_applied_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right {{ $detail['generated_credit_amount'] > 0 ? 'text-violet-700' : 'text-slate-500' }}">Rp {{ number_format($detail['generated_credit_amount'], 0, ',', '.') }}</td>
-                                    <td class="text-right {{ $detail['outstanding_amount'] > 0 ? 'text-amber-700' : 'text-slate-500' }}">Rp {{ number_format($detail['outstanding_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap font-semibold text-slate-900">{{ $detail['member_name'] }}</td>
+                                    <td class="whitespace-nowrap text-slate-600">{{ $detail['group_label'] }}</td><td class="whitespace-nowrap text-slate-600">{{ $detail['category_name'] }}</td>
+                                    <td class="whitespace-nowrap text-right font-semibold">Rp {{ number_format($detail['gross_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-emerald-700">Rp {{ number_format($detail['paid_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right text-blue-700">Rp {{ number_format($detail['credit_applied_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right {{ $detail['generated_credit_amount'] > 0 ? 'text-violet-700' : 'text-slate-500' }}">Rp {{ number_format($detail['generated_credit_amount'], 0, ',', '.') }}</td>
+                                    <td class="whitespace-nowrap text-right {{ $detail['outstanding_amount'] > 0 ? 'text-amber-700' : 'text-slate-500' }}">Rp {{ number_format($detail['outstanding_amount'], 0, ',', '.') }}</td>
                                     <td><span @class([
+                                        'whitespace-nowrap',
                                         'badge-success' => $detail['payment_status'] === CateringBillStatus::Paid->value,
                                         'inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200' => $detail['payment_status'] === CateringBillStatus::Partial->value,
                                         'badge-neutral' => $detail['payment_status'] === CateringBillStatus::Unpaid->value,

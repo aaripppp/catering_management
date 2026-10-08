@@ -10,6 +10,7 @@
         <x-branding-icons />
 
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+        @livewireStyles
         @livewireScripts
     </head>
     <body class="bg-slate-50 font-sans text-slate-900 antialiased">

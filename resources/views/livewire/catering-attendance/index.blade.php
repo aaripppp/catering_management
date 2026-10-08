@@ -80,7 +80,7 @@
     @endphp
 
     <section class="card card-body">
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <div>
                 <label for="attendance-month" class="label">Bulan</label>
                 <select id="attendance-month" class="select" x-on:change="changeFilter('month', $event.target)">
@@ -144,22 +144,37 @@
                 </select>
                 @error('schoolClassId')<p class="field-error">{{ $message }}</p>@enderror
             </div>
-
-            <div class="flex items-end">
-                <button
-                    type="button"
-                    wire:click="generateAttendance"
-                    wire:loading.attr="disabled"
-                    wire:target="generateAttendance"
-                    class="btn-primary w-full justify-center"
-                >
-                    <span wire:loading.remove wire:target="generateAttendance">Generate Kehadiran</span>
-                    <span wire:loading wire:target="generateAttendance">Memproses...</span>
-                </button>
-            </div>
         </div>
 
-        <div wire:loading.delay.flex wire:target="changeFilter,loadMatrix" class="mt-4 items-center gap-2 text-sm text-blue-600">
+        <div class="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <button
+                type="button"
+                wire:click="generateAttendance"
+                wire:loading.attr="disabled"
+                wire:target="generateAttendance"
+                class="inline-flex h-11 w-full min-w-[190px] flex-none items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+                <span wire:loading.remove wire:target="generateAttendance">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M3 11h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+                        </svg>
+                        <span>Generate Kehadiran</span>
+                    </span>
+                </span>
+                <span wire:loading wire:target="generateAttendance">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" />
+                            <path class="opacity-75" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z" />
+                        </svg>
+                        <span>Memproses...</span>
+                    </span>
+                </span>
+            </button>
+        </div>
+
+        <div wire:loading.delay.flex wire:target="changeFilter,loadMatrix" style="display:none" class="mt-4 items-center gap-2 text-sm text-blue-600">
             <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" />
                 <path class="opacity-75" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z" />
@@ -251,7 +266,7 @@
                                     href="{{ $classInvoiceUrl }}"
                                     target="_blank"
                                     rel="noopener"
-                                    class="btn-secondary"
+                                    class="btn-secondary whitespace-nowrap"
                                     title="Buka pratinjau PDF rekap tagihan catering kelas ini di tab baru"
                                 >
                                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -267,7 +282,7 @@
                             wire:click="downloadAllInvoices"
                             wire:loading.attr="disabled"
                             wire:target="downloadAllInvoices"
-                            class="btn-secondary"
+                            class="btn-secondary whitespace-nowrap"
                             title="Unduh satu file ZIP berisi invoice PDF individual setiap peserta pada periode ini"
                         >
                             <svg wire:loading.remove wire:target="downloadAllInvoices" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -306,10 +321,10 @@
                     <table class="min-w-max border-separate border-spacing-0 text-xs">
                         <thead>
                             <tr>
-                                <th class="sticky left-0 top-0 z-30 w-12 min-w-12 border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-semibold uppercase tracking-wide text-slate-500">
+                                <th class="sticky left-0 top-0 z-30 w-12 min-w-12 whitespace-nowrap border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-semibold uppercase tracking-wide text-slate-500">
                                     No
                                 </th>
-                                <th class="sticky left-12 top-0 z-30 min-w-56 border-b border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-semibold uppercase tracking-wide text-slate-500 shadow-[2px_0_0_0_rgb(226_232_240)]">
+                                <th class="sticky left-12 top-0 z-30 min-w-56 whitespace-nowrap border-b border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-semibold uppercase tracking-wide text-slate-500 shadow-[2px_0_0_0_rgb(226_232_240)]">
                                     Nama Peserta
                                 </th>
                                 @foreach ($dates as $date)
@@ -341,7 +356,7 @@
                                         </button>
                                     </th>
                                 @endforeach
-                                <th class="sticky right-0 top-0 z-30 w-32 min-w-32 border-b border-l border-slate-200 bg-slate-50 px-3 py-3 text-center font-semibold uppercase tracking-wide text-slate-500 shadow-[-2px_0_0_0_rgb(226_232_240)]">
+                                <th class="sticky right-0 top-0 z-30 w-32 min-w-32 whitespace-nowrap border-b border-l border-slate-200 bg-slate-50 px-3 py-3 text-center font-semibold uppercase tracking-wide text-slate-500 shadow-[-2px_0_0_0_rgb(226_232_240)]">
                                     Aksi
                                 </th>
                             </tr>
@@ -352,7 +367,7 @@
                                     <td class="sticky left-0 z-20 w-12 min-w-12 border-b border-r border-slate-200 bg-white px-2 py-2.5 text-center text-xs text-slate-500 group-hover:bg-slate-50">
                                         {{ $loop->iteration }}
                                     </td>
-                                    <th class="sticky left-12 z-10 min-w-56 border-b border-r border-slate-200 bg-white px-4 py-2.5 text-left text-sm font-medium text-slate-800 shadow-[2px_0_0_0_rgb(226_232_240)] group-hover:bg-slate-50">
+                                    <th class="sticky left-12 z-10 min-w-56 whitespace-nowrap border-b border-r border-slate-200 bg-white px-4 py-2.5 text-left text-sm font-medium text-slate-800 shadow-[2px_0_0_0_rgb(226_232_240)] group-hover:bg-slate-50">
                                         {{ $participant['name'] }}
                                     </th>
                                     @foreach ($dates as $date)
@@ -387,7 +402,7 @@
                                                     href="{{ $memberInvoiceUrl }}"
                                                     target="_blank"
                                                     rel="noopener"
-                                                    class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
+                                                    class="inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
                                                     title="Buka pratinjau invoice catering individual {{ $participant['name'] }} di tab baru"
                                                     aria-label="Cetak invoice {{ $participant['name'] }}"
                                                 >
