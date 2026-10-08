@@ -80,7 +80,7 @@
     @endphp
 
     <section class="card card-body">
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <div>
                 <label for="attendance-month" class="label">Bulan</label>
                 <select id="attendance-month" class="select" x-on:change="changeFilter('month', $event.target)">
@@ -143,6 +143,19 @@
                     @endforeach
                 </select>
                 @error('schoolClassId')<p class="field-error">{{ $message }}</p>@enderror
+            </div>
+
+            <div class="flex items-end">
+                <button
+                    type="button"
+                    wire:click="generateAttendance"
+                    wire:loading.attr="disabled"
+                    wire:target="generateAttendance"
+                    class="btn-primary w-full justify-center"
+                >
+                    <span wire:loading.remove wire:target="generateAttendance">Generate Kehadiran</span>
+                    <span wire:loading wire:target="generateAttendance">Memproses...</span>
+                </button>
             </div>
         </div>
 

@@ -20,14 +20,9 @@
             'label' => 'Catering',
             'items' => [
                 ['name' => 'Absensi Catering', 'href' => route('catering-attendance.index'), 'active' => request()->routeIs('catering-attendance.*'), 'icon' => 'calendar'],
-                ['name' => 'Rekap Absensi', 'href' => '#', 'icon' => 'chart', 'disabled' => true],
-                ['name' => 'Tagihan Bulanan', 'href' => '#', 'icon' => 'receipt', 'disabled' => true],
-            ],
-        ],
-        [
-            'label' => 'Laporan',
-            'items' => [
-                ['name' => 'Laporan', 'href' => '#', 'icon' => 'document', 'disabled' => true],
+                ['name' => 'Rekap Absensi', 'href' => route('catering-attendance-recap.index'), 'active' => request()->routeIs('catering-attendance-recap.*'), 'icon' => 'chart'],
+                ...($isAdmin ? [['name' => 'Tagihan Bulanan', 'href' => route('catering-bills.index'), 'active' => request()->routeIs('catering-bills.*'), 'icon' => 'receipt']] : []),
+                ...($isAdmin ? [['name' => 'Laporan', 'href' => route('catering-monthly-report.index'), 'active' => request()->routeIs('catering-monthly-report.*'), 'icon' => 'document']] : []),
             ],
         ],
     ];

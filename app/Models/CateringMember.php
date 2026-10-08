@@ -66,6 +66,24 @@ class CateringMember extends Model
         return $this->hasMany(CateringAttendance::class);
     }
 
+    /** @return HasMany<CateringBill, $this> */
+    public function bills(): HasMany
+    {
+        return $this->hasMany(CateringBill::class);
+    }
+
+    /** @return HasMany<CateringPayment, $this> */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(CateringPayment::class);
+    }
+
+    /** @return HasMany<CateringCredit, $this> */
+    public function credits(): HasMany
+    {
+        return $this->hasMany(CateringCredit::class);
+    }
+
     /**
      * The catering operational placement of an employee participant.
      *

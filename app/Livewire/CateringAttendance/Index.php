@@ -107,6 +107,32 @@ class Index extends Component
         };
     }
 
+    public function generateAttendance(): void
+    {
+        abort_unless(auth()->check(), 403);
+
+        $this->validate([
+            'month' => ['required', 'integer', 'between:1,12'],
+            'year' => ['required', 'integer', 'between:2000,2100'],
+        ]);
+
+        $createdCount = CateringAttendanceInitializerService::ensureMonth($this->year, $this->month);
+
+        if ($this->matrixLoaded) {
+            $this->loadMatrix();
+        }
+
+        $period = $this->monthOptions()[$this->month].' '.$this->year;
+
+        $this->dispatch(
+            'toast',
+            type: $createdCount > 0 ? 'success' : 'info',
+            message: $createdCount > 0
+                ? "Absensi {$period} berhasil digenerate."
+                : "Semua absensi {$period} sudah tersedia.",
+        );
+    }
+
     /**
      * Load the attendance matrix and initialise any missing records.
      *

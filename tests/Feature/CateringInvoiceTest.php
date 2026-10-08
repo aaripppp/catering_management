@@ -4,12 +4,15 @@ use App\Enums\CateringAttendanceStatus;
 use App\Enums\CateringParticipantGroup;
 use App\Livewire\CateringAttendance\Index as CateringAttendanceIndex;
 use App\Models\CateringAttendance;
+use App\Models\CateringBill;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringAttendanceInitializerService;
+use App\Services\CateringBillingService;
 use App\Services\CateringInvoiceService;
+use App\Services\CateringPaymentService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -631,7 +634,7 @@ it('does not introduce an n+1 pattern when building bulk invoices', function () 
     DB::disableQueryLog();
 
     expect($invoices)->toHaveCount(12)
-        ->and($queryCount)->toBeLessThanOrEqual(4);
+        ->and($queryCount)->toBeLessThanOrEqual(5);
 });
 
 it('uses employee wording for the employee participant group', function () {
@@ -836,7 +839,7 @@ it('ignores attendance rows outside the invoiced month', function () {
         ->and($invoice['total'])->toBe(60000);
 });
 
-it('bills the current category price because attendance stores no price snapshot', function () {
+it('uses the current category price when the monthly bill has not been generated', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 14000]);
     $member = CateringMember::factory()->create([
@@ -858,6 +861,73 @@ it('bills the current category price because attendance stores no price snapshot
         ->and($after['quantity'])->toBe($before['quantity'])
         ->and(Schema::getColumnListing('catering_attendances'))
         ->not->toContain('price_per_day');
+});
+
+it('uses generated bill snapshots for invoice financial values', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['price_per_day' => 14000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 10, sakit: 2);
+
+    app(CateringBillingService::class)->generate(
+        year: 2026,
+        month: 9,
+        group: CateringParticipantGroup::Student,
+        actor: User::factory()->admin()->create(),
+    );
+
+    $category->update(['price_per_day' => 16000]);
+    CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->where('status', CateringAttendanceStatus::Ikut)
+        ->firstOrFail()
+        ->update(['status' => CateringAttendanceStatus::Izin]);
+
+    [$start, $end] = invoicePeriod();
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory']),
+        $start,
+        $end,
+    );
+
+    expect(CateringBill::query()->sole()->gross_amount)->toBe(140000)
+        ->and($invoice['pricePerDay'])->toBe(14000)
+        ->and($invoice['quantity'])->toBe(10)
+        ->and($invoice['countSakit'])->toBe(2)
+        ->and($invoice['countIzin'])->toBe(0)
+        ->and($invoice['total'])->toBe(140000);
+});
+
+it('reflects the latest resynced bill and payment balance in the invoice', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['price_per_day' => 14000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 10);
+    $admin = User::factory()->admin()->create();
+    $billing = app(CateringBillingService::class);
+    $billing->generate(2026, 9, CateringParticipantGroup::Student, $schoolClass, actor: $admin);
+    $bill = CateringBill::query()->sole();
+    app(CateringPaymentService::class)->record($bill, 140000, $admin);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-09-26',
+        'status' => CateringAttendanceStatus::Ikut,
+    ]);
+    $billing->generate(2026, 9, CateringParticipantGroup::Student, $schoolClass, actor: $admin);
+
+    [$start, $end] = invoicePeriod();
+    $invoice = invoiceService()->buildMemberInvoice($member->fresh(['cateringCategory']), $start, $end);
+
+    expect($invoice['quantity'])->toBe(11)
+        ->and($invoice['total'])->toBe(154000)
+        ->and($invoice['paidAmount'])->toBe(140000)
+        ->and($invoice['remainingAmount'])->toBe(14000)
+        ->and($invoice['paymentStatusLabel'])->toBe('Sebagian');
 });
 
 it('lists every non-libur attendance date in the individual invoice detail table', function () {

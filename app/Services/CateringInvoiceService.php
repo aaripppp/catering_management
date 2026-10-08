@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CateringAttendanceStatus;
 use App\Enums\CateringParticipantGroup;
 use App\Models\CateringAttendance;
+use App\Models\CateringBill;
 use App\Models\CateringMember;
 use App\Models\SchoolClass;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -57,8 +58,15 @@ class CateringInvoiceService
         CarbonImmutable $end,
     ): array {
         $rowsByMember = $this->attendanceRowsForMembers([$member->id], $start, $end);
+        $bill = CateringBill::query()
+            ->where('catering_member_id', $member->id)
+            ->where('period_month', $start->month)
+            ->where('period_year', $start->year)
+            ->withSum('payments as paid_amount', 'amount')
+            ->withSum('creditAllocations as credit_applied_amount', 'amount')
+            ->first();
 
-        return $this->composeInvoice($member, $rowsByMember[$member->id] ?? [], $start, $end);
+        return $this->composeInvoice($member, $rowsByMember[$member->id] ?? [], $start, $end, $bill);
     }
 
     /**
@@ -87,6 +95,14 @@ class CateringInvoiceService
         $rowsByMember = $members->isEmpty()
             ? []
             : $this->attendanceRowsForMembers($members->pluck('id')->all(), $start, $end);
+        $billsByMember = CateringBill::query()
+            ->whereIn('catering_member_id', $members->pluck('id'))
+            ->where('period_month', $start->month)
+            ->where('period_year', $start->year)
+            ->withSum('payments as paid_amount', 'amount')
+            ->withSum('creditAllocations as credit_applied_amount', 'amount')
+            ->get()
+            ->keyBy('catering_member_id');
 
         $rows = [];
         $grandTotal = 0;
@@ -99,11 +115,14 @@ class CateringInvoiceService
 
         foreach ($members as $member) {
             $memberRows = $rowsByMember[$member->id] ?? [];
-            $counts = $this->statusCounts($this->invoiceVisibleRows($memberRows));
-            $pricePerDay = (int) ($member->cateringCategory?->price_per_day ?? 0);
-            $total = $counts[self::BILLABLE_STATUS->value] * $pricePerDay;
+            $bill = $billsByMember->get($member->id);
+            $counts = $bill === null
+                ? $this->statusCounts($this->invoiceVisibleRows($memberRows))
+                : $this->billStatusCounts($bill);
+            $pricePerDay = $bill?->price_per_day ?? (int) ($member->cateringCategory?->price_per_day ?? 0);
+            $total = $bill?->gross_amount ?? ($counts[self::BILLABLE_STATUS->value] * $pricePerDay);
 
-            $savedDays += count($memberRows);
+            $savedDays += $bill?->saved_days ?? count($memberRows);
             $grandTotal += $total;
 
             foreach ($totals as $statusValue => $count) {
@@ -122,7 +141,7 @@ class CateringInvoiceService
                 'eventUnit' => $counts[CateringAttendanceStatus::EventUnit->value],
                 'puasa' => $counts[CateringAttendanceStatus::Puasa->value],
                 'libur' => $counts[CateringAttendanceStatus::Libur->value],
-                'savedDays' => count($memberRows),
+                'savedDays' => $bill?->saved_days ?? count($memberRows),
                 'pricePerDay' => $pricePerDay,
                 'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
                 'total' => $total,
@@ -201,13 +220,22 @@ class CateringInvoiceService
             $start,
             $end,
         );
+        $billsByMember = CateringBill::query()
+            ->whereIn('catering_member_id', $members->pluck('id'))
+            ->where('period_month', $start->month)
+            ->where('period_year', $start->year)
+            ->withSum('payments as paid_amount', 'amount')
+            ->withSum('creditAllocations as credit_applied_amount', 'amount')
+            ->get()
+            ->keyBy('catering_member_id');
 
         return $members
             ->map(fn (CateringMember $member): array => $this->composeInvoice(
-                $member,
-                $rowsByMember[$member->id] ?? [],
-                $start,
-                $end,
+                member: $member,
+                rows: $rowsByMember[$member->id] ?? [],
+                start: $start,
+                end: $end,
+                bill: $billsByMember->get($member->id),
             ))
             ->values()
             ->all();
@@ -437,20 +465,23 @@ class CateringInvoiceService
         array $rows,
         CarbonImmutable $start,
         CarbonImmutable $end,
+        ?CateringBill $bill = null,
     ): array {
         $category = $member->relationLoaded('cateringCategory')
             ? $member->cateringCategory
             : $member->cateringCategory()->first();
 
-        $pricePerDay = (int) ($category?->price_per_day ?? 0);
+        $pricePerDay = $bill?->price_per_day ?? (int) ($category?->price_per_day ?? 0);
         $visibleRows = $this->invoiceVisibleRows($rows);
-        $counts = $this->statusCounts($visibleRows);
+        $counts = $bill === null
+            ? $this->statusCounts($visibleRows)
+            : $this->billStatusCounts($bill);
         $quantity = $counts[self::BILLABLE_STATUS->value];
         $group = $category?->participant_group ?? CateringParticipantGroup::Student;
         $usesClass = $group->requiresClassSelection();
         $className = $usesClass ? ($member->schoolClass?->name ?? '-') : $group->label();
         $isEmployee = $group === CateringParticipantGroup::Employee;
-        $total = $quantity * $pricePerDay;
+        $total = $bill?->gross_amount ?? ($quantity * $pricePerDay);
         $invoiceNumber = sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id);
 
         return [
@@ -475,11 +506,16 @@ class CateringInvoiceService
             'titleLabel' => $isEmployee ? 'INVOICE CATERING PEGAWAI' : 'INVOICE CATERING SISWA',
             'participantGroupLabel' => $group->label(),
             'quantity' => $quantity,
-            'savedDays' => count($rows),
+            'savedDays' => $bill?->saved_days ?? count($rows),
             'pricePerDay' => $pricePerDay,
             'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
             'total' => $total,
             'totalFormatted' => $this->formatRupiah($total),
+            'paymentStatusLabel' => $bill?->payment_status->label(),
+            'paidAmount' => $bill?->paidAmount() ?? 0,
+            'paidAmountFormatted' => $this->formatRupiah($bill?->paidAmount() ?? 0),
+            'remainingAmount' => $bill?->remainingAmount() ?? $total,
+            'remainingAmountFormatted' => $this->formatRupiah($bill?->remainingAmount() ?? $total),
             'attendanceRows' => $this->detailRows($visibleRows, $pricePerDay),
             'countIkut' => $counts[self::BILLABLE_STATUS->value],
             'countSakit' => $counts[CateringAttendanceStatus::Sakit->value],
@@ -497,6 +533,22 @@ class CateringInvoiceService
                 mb_strtoupper($className),
             ),
             'logoDataUri' => $this->logoDataUri(),
+        ];
+    }
+
+    /** @return array<string, int> */
+    private function billStatusCounts(CateringBill $bill): array
+    {
+        return [
+            CateringAttendanceStatus::Ikut->value => $bill->active_days,
+            CateringAttendanceStatus::Sakit->value => $bill->sakit_days,
+            CateringAttendanceStatus::Izin->value => $bill->izin_days,
+            CateringAttendanceStatus::Alfa->value => $bill->alfa_days,
+            CateringAttendanceStatus::TidakIkut->value => $bill->off_days,
+            CateringAttendanceStatus::Ujian->value => $bill->ujian_days,
+            CateringAttendanceStatus::EventUnit->value => $bill->event_unit_days,
+            CateringAttendanceStatus::Puasa->value => $bill->puasa_days,
+            CateringAttendanceStatus::Libur->value => $bill->libur_days,
         ];
     }
 

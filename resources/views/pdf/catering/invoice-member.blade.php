@@ -386,6 +386,16 @@
             <span class="meta-key">Harga / Porsi</span>
             <span class="meta-value">{{ $pricePerDayFormatted }}</span>
         </div>
+        @if ($paymentStatusLabel)
+            <div class="meta-row">
+                <span class="meta-key">Terbayar</span>
+                <span class="meta-value">{{ $paidAmountFormatted }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="meta-key">Sisa / Status</span>
+                <span class="meta-value">{{ $remainingAmountFormatted }} / {{ $paymentStatusLabel }}</span>
+            </div>
+        @endif
     </div>
 </div>
 

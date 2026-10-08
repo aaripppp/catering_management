@@ -17,14 +17,14 @@ class CateringAttendanceInitializerService
         self::ensureRange($attendanceDate, $attendanceDate);
     }
 
-    public static function ensureMonth(int $year, int $month): void
+    public static function ensureMonth(int $year, int $month): int
     {
         $startDate = CarbonImmutable::create($year, $month, 1)->startOfMonth();
 
-        self::ensureRange($startDate, $startDate->endOfMonth());
+        return self::ensureRange($startDate, $startDate->endOfMonth());
     }
 
-    private static function ensureRange(CarbonImmutable $startDate, CarbonImmutable $endDate): void
+    private static function ensureRange(CarbonImmutable $startDate, CarbonImmutable $endDate): int
     {
         $memberIds = CateringMember::query()
             ->active()
@@ -32,7 +32,7 @@ class CateringAttendanceInitializerService
             ->all();
 
         if ($memberIds === []) {
-            return;
+            return 0;
         }
 
         $dates = [];
@@ -59,6 +59,7 @@ class CateringAttendanceInitializerService
 
         $now = now();
         $rows = [];
+        $createdCount = 0;
 
         foreach ($memberIds as $memberId) {
             foreach ($dates as $date => $defaults) {
@@ -75,15 +76,17 @@ class CateringAttendanceInitializerService
                 ];
 
                 if (count($rows) === 500) {
-                    CateringAttendance::query()->insertOrIgnore($rows);
+                    $createdCount += CateringAttendance::query()->insertOrIgnore($rows);
                     $rows = [];
                 }
             }
         }
 
         if ($rows !== []) {
-            CateringAttendance::query()->insertOrIgnore($rows);
+            $createdCount += CateringAttendance::query()->insertOrIgnore($rows);
         }
+
+        return $createdCount;
     }
 
     private static function dateForStorage(CarbonInterface|string $date): string
