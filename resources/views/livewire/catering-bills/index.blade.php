@@ -57,7 +57,7 @@
                 </div>
             @endif
         </div>
-        <p class="mt-3 text-xs text-slate-500">Memperbarui jumlah hari dari absensi terbaru, mempertahankan harga periode, dan menghitung ulang pembayaran serta kredit.</p>
+        <p class="mt-3 text-xs text-slate-500">Memperbarui kategori, harga, dan jumlah hari dari data terbaru, lalu menghitung ulang pembayaran serta kredit.</p>
         <div class="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <button type="button" wire:click="generate" wire:loading.attr="disabled" wire:target="generate" class="inline-flex h-11 w-full min-w-[190px] flex-none items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
                 <span wire:loading.remove wire:target="generate">

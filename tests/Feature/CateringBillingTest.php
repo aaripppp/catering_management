@@ -78,7 +78,7 @@ function generateBillingPeriod(
     );
 }
 
-it('generates an immutable monthly snapshot from attendance and category data', function () {
+it('stores a monthly snapshot until the next manual sync', function () {
     ['member' => $member, 'class' => $schoolClass, 'category' => $category] = billingParticipant();
     storeBillingAttendance($member, 2026, 10, activeDays: 20, sickDays: 2);
     $admin = User::factory()->admin()->create();
@@ -117,7 +117,7 @@ it('prevents duplicate member bills for one period at database level', function 
     ]))->toThrow(QueryException::class);
 });
 
-it('resyncs unpaid attendance totals while preserving the existing price snapshot', function () {
+it('resyncs unpaid attendance totals using the current category price', function () {
     ['member' => $member, 'class' => $schoolClass, 'category' => $category] = billingParticipant();
     storeBillingAttendance($member, 2026, 10, activeDays: 20);
     generateBillingPeriod($schoolClass);
@@ -133,9 +133,163 @@ it('resyncs unpaid attendance totals while preserving the existing price snapsho
     expect($result['regenerated'])->toBe(1)
         ->and($result['skipped'])->toBe(0)
         ->and($bill->fresh()->active_days)->toBe(21)
-        ->and($bill->fresh()->price_per_day)->toBe(20000)
-        ->and($bill->fresh()->gross_amount)->toBe(420000)
+        ->and($bill->fresh()->price_per_day)->toBe(25000)
+        ->and($bill->fresh()->gross_amount)->toBe(525000)
         ->and($bill->fresh()->payment_status)->toBe(CateringBillStatus::Unpaid);
+});
+
+it('refreshes the category and price snapshots without altering another member bill', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000, 'Peserta Dikoreksi');
+    $originalCategory = $member->cateringCategory;
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Anak Guru',
+        'price_per_day' => 10000,
+    ]);
+    $otherMember = CateringMember::factory()->create([
+        'name' => 'Peserta Lain',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $originalCategory->id,
+    ]);
+    storeBillingAttendance($member, 2026, 10, activeDays: 22);
+    storeBillingAttendance($otherMember, 2026, 10, activeDays: 10);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->where('catering_member_id', $member->id)->sole();
+    $otherBill = CateringBill::query()->where('catering_member_id', $otherMember->id)->sole();
+
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+    $otherBill->refresh();
+
+    expect($bill->catering_category_id)->toBe($correctedCategory->id)
+        ->and($bill->category_name)->toBe('Anak Guru')
+        ->and($bill->price_per_day)->toBe(10000)
+        ->and($bill->active_days)->toBe(22)
+        ->and($bill->gross_amount)->toBe(220000);
+    expect($otherBill->catering_category_id)->toBe($originalCategory->id)
+        ->and($otherBill->category_name)->toBe($originalCategory->name)
+        ->and($otherBill->price_per_day)->toBe(16000)
+        ->and($otherBill->gross_amount)->toBe(160000);
+});
+
+it('preserves a full payment and creates credit after a category correction lowers the bill', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Anak Guru',
+        'price_per_day' => 10000,
+    ]);
+    storeBillingAttendance($member, 2026, 10, activeDays: 22);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 352000);
+
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+    $credit = CateringCredit::query()->sole();
+
+    expect($bill->gross_amount)->toBe(220000)
+        ->and($bill->paidAmount())->toBe(352000)
+        ->and($bill->remainingAmount())->toBe(0)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Paid)
+        ->and($bill->generatedCreditAmount())->toBe(132000);
+    expect($bill->payments()->sole()->is($payment))->toBeTrue()
+        ->and(CateringPayment::query()->count())->toBe(1);
+    expect($credit->source_payment_id)->toBe($payment->id)
+        ->and($credit->source_bill_id)->toBe($bill->id)
+        ->and($credit->original_amount)->toBe(132000)
+        ->and($credit->remaining_amount)->toBe(132000);
+});
+
+it('recalculates a partial payment after a category correction lowers the bill', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Anak Guru',
+        'price_per_day' => 10000,
+    ]);
+    storeBillingAttendance($member, 2026, 10, activeDays: 22);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 200000);
+
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+
+    expect($bill->gross_amount)->toBe(220000)
+        ->and($bill->paidAmount())->toBe(200000)
+        ->and($bill->remainingAmount())->toBe(20000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Partial)
+        ->and($bill->generatedCreditAmount())->toBe(0);
+    expect($bill->payments()->sole()->is($payment))->toBeTrue();
+});
+
+it('recalculates a paid bill as partial after a category correction raises the price', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(10000);
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Siswa Umum',
+        'price_per_day' => 16000,
+    ]);
+    storeBillingAttendance($member, 2026, 10, activeDays: 22);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 220000);
+
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+
+    expect($bill->gross_amount)->toBe(352000)
+        ->and($bill->paidAmount())->toBe(220000)
+        ->and($bill->remainingAmount())->toBe(132000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Partial)
+        ->and($bill->generatedCreditAmount())->toBe(0);
+    expect($bill->payments()->sole()->is($payment))->toBeTrue();
+});
+
+it('rebuilds downstream credit idempotently after a category correction', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Anak Guru',
+        'price_per_day' => 10000,
+    ]);
+    storeBillingAttendance($member, 2026, 10, activeDays: 22);
+    generateBillingPeriod($schoolClass, month: 10);
+    $october = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($october, 352000);
+    storeBillingAttendance($member, 2026, 11, activeDays: 22);
+    generateBillingPeriod($schoolClass, month: 11);
+    $november = CateringBill::query()->where('period_month', 11)->sole();
+
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+    generateBillingPeriod($schoolClass, month: 10);
+    generateBillingPeriod($schoolClass, month: 10);
+
+    $october->refresh();
+    $november->refresh();
+    $credit = CateringCredit::query()->sole();
+    $allocation = CateringCreditAllocation::query()->sole();
+
+    expect($october->gross_amount)->toBe(220000)
+        ->and($october->payment_status)->toBe(CateringBillStatus::Paid)
+        ->and($october->generatedCreditAmount())->toBe(132000);
+    expect($november->gross_amount)->toBe(352000)
+        ->and($november->creditAppliedAmount())->toBe(132000)
+        ->and($november->remainingAmount())->toBe(220000)
+        ->and($november->payment_status)->toBe(CateringBillStatus::Partial);
+    expect($credit->source_payment_id)->toBe($payment->id)
+        ->and($credit->original_amount)->toBe(132000)
+        ->and($credit->remaining_amount)->toBe(0);
+    expect($allocation->catering_bill_id)->toBe($november->id)
+        ->and($allocation->amount)->toBe(132000);
+    expect(CateringBill::query()->count())->toBe(2)
+        ->and(CateringPayment::query()->count())->toBe(1)
+        ->and(CateringCredit::query()->count())->toBe(1)
+        ->and(CateringCreditAllocation::query()->count())->toBe(1);
 });
 
 it('allows partially paid bills to resync without changing payment transactions', function () {
@@ -291,7 +445,7 @@ it('carries a large credit safely across multiple future periods', function () {
         ->and(CateringCreditAllocation::query()->count())->toBe(3);
 });
 
-it('resyncs bills with allocated credit and preserves their price snapshot', function () {
+it('resyncs bills with allocated credit using the current category price', function () {
     ['member' => $member, 'class' => $schoolClass, 'category' => $category] = billingParticipant();
     storeBillingAttendance($member, 2026, 10);
     generateBillingPeriod($schoolClass, month: 10);
@@ -309,10 +463,10 @@ it('resyncs bills with allocated credit and preserves their price snapshot', fun
 
     expect($result['regenerated'])->toBe(1)
         ->and($result['skipped'])->toBe(0)
-        ->and($november->fresh()->price_per_day)->toBe(20000)
-        ->and($november->fresh()->gross_amount)->toBe(420000)
+        ->and($november->fresh()->price_per_day)->toBe(30000)
+        ->and($november->fresh()->gross_amount)->toBe(630000)
         ->and($november->fresh()->creditAppliedAmount())->toBe(100000)
-        ->and($november->fresh()->remainingAmount())->toBe(320000);
+        ->and($november->fresh()->remainingAmount())->toBe(530000);
 });
 
 it('creates missing participant bills on resync without duplicating existing bills', function () {

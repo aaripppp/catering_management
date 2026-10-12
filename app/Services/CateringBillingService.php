@@ -134,7 +134,7 @@ class CateringBillingService
 
                 $memberCounts = $counts[$member->id] ?? $this->emptyCounts();
                 $category = $member->cateringCategory;
-                $pricePerDay = $existing?->price_per_day ?? (int) ($category?->price_per_day ?? 0);
+                $pricePerDay = (int) ($category?->price_per_day ?? 0);
 
                 $snapshots[] = [
                     'catering_member_id' => $member->id,

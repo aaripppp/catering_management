@@ -63,6 +63,54 @@ it('generates bills for the selected period and class', function () {
         ->and($bill->generated_by)->toBe($admin->id);
 });
 
+it('immediately shows corrected category price and financial state after sync', function () {
+    $admin = User::factory()->admin()->create();
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $originalCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Siswa Umum',
+        'price_per_day' => 16000,
+    ]);
+    $correctedCategory = CateringCategory::factory()->student()->create([
+        'name' => 'Anak Guru',
+        'price_per_day' => 10000,
+    ]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $originalCategory->id,
+    ]);
+    CateringAttendance::factory()->count(22)->sequence(
+        fn ($sequence): array => [
+            'attendance_date' => now()->startOfMonth()->addDays($sequence->index)->toDateString(),
+            'status' => CateringAttendanceStatus::Ikut,
+        ],
+    )->for($member)->create();
+    app(CateringBillingService::class)->generate(
+        now()->year,
+        now()->month,
+        CateringParticipantGroup::Student,
+        $schoolClass,
+        actor: $admin,
+    );
+    $bill = CateringBill::query()->sole();
+    app(CateringPaymentService::class)->record($bill, 200000, $admin);
+    $member->update(['catering_category_id' => $correctedCategory->id]);
+
+    Livewire::actingAs($admin)
+        ->test(CateringBillIndex::class)
+        ->set('participantGroup', CateringParticipantGroup::Student->value)
+        ->set('schoolClassId', (string) $schoolClass->id)
+        ->call('generate')
+        ->assertHasNoErrors()
+        ->assertDispatched('toast')
+        ->assertSee('Anak Guru')
+        ->assertSee('Rp 10.000')
+        ->assertSee('Rp 220.000')
+        ->assertSee('Rp 200.000')
+        ->assertSee('Rp 20.000')
+        ->assertSee(CateringBillStatus::Partial->label());
+});
+
 it('shows each category in its own column before the daily price without changing bill actions', function () {
     $admin = User::factory()->admin()->create();
     CateringBill::factory()->create([
