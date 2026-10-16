@@ -34,6 +34,15 @@ class Index extends Component
 
     public string $participantGroup = CateringParticipantGroup::Student->value;
 
+    public string $participantSearch = '';
+
+    #[Locked]
+    public ?int $selectedParticipantId = null;
+
+    /** @var array{id: int, name: string, participant_group: string, category_name: string, context_label: string, school_class_id: int|null, school_class_is_active: bool}|null */
+    #[Locked]
+    public ?array $selectedParticipant = null;
+
     /** @var array<int, array{id: int, name: string, level: string}> */
     public array $classOptions = [];
 
@@ -133,6 +142,33 @@ class Index extends Component
         );
     }
 
+    public function selectParticipant(int $memberId): void
+    {
+        abort_unless(auth()->check(), 403);
+
+        $member = $this->eligibleParticipantQuery()->find($memberId);
+
+        if ($member === null) {
+            throw ValidationException::withMessages([
+                'participantSearch' => 'Peserta catering aktif tidak ditemukan.',
+            ]);
+        }
+
+        $this->selectedParticipantId = $member->id;
+        $this->selectedParticipant = $this->participantContext($member);
+        $this->participantSearch = '';
+        $this->loadMatrix();
+    }
+
+    public function clearSelectedParticipant(): void
+    {
+        abort_unless(auth()->check(), 403);
+
+        $this->forgetSelectedParticipant();
+        $this->participantSearch = '';
+        $this->reloadSelectedMatrix();
+    }
+
     /**
      * Load the attendance matrix and initialise any missing records.
      *
@@ -143,9 +179,26 @@ class Index extends Component
     {
         abort_unless(auth()->check(), 403);
 
-        $this->validateSelection();
-        $group = $this->selectedParticipantGroup();
-        $schoolClass = $this->resolveSelectedClass();
+        if ($this->selectedParticipantId !== null) {
+            $this->validatePeriod();
+            $selectedMember = $this->eligibleParticipantQuery()->find($this->selectedParticipantId);
+
+            if ($selectedMember === null) {
+                $this->clearUnavailableSelectedParticipant();
+
+                return;
+            }
+
+            $group = $selectedMember->cateringCategory->participant_group;
+            $schoolClass = $group->requiresClassSelection() ? $selectedMember->schoolClass : null;
+            $participantModels = collect([$selectedMember]);
+            $this->selectedParticipant = $this->participantContext($selectedMember);
+        } else {
+            $this->validateSelection();
+            $group = $this->selectedParticipantGroup();
+            $schoolClass = $this->resolveSelectedClass();
+            $participantModels = $this->participantQuery($group, $schoolClass)->get();
+        }
 
         $start = CarbonImmutable::create($this->year, $this->month, 1)->startOfMonth();
         $end = $start->endOfMonth();
@@ -153,8 +206,7 @@ class Index extends Component
 
         CateringAttendanceInitializerService::ensureMonth($this->year, $this->month);
 
-        $participants = $this->participantQuery($group, $schoolClass)
-            ->get()
+        $participants = $participantModels
             ->map(fn (CateringMember $member): array => [
                 'id' => $member->id,
                 'name' => $member->name,
@@ -337,6 +389,27 @@ class Index extends Component
             return null;
         }
 
+        if ($this->selectedParticipantId !== null) {
+            if ($this->selectedParticipant === null || $this->selectedParticipant['id'] !== $memberId) {
+                return null;
+            }
+
+            $group = CateringParticipantGroup::from($this->selectedParticipant['participant_group']);
+            $schoolClassId = $this->selectedParticipant['school_class_id'];
+
+            if ($group->requiresClassSelection() && ($schoolClassId === null || ! $this->selectedParticipant['school_class_is_active'])) {
+                return null;
+            }
+
+            return route('catering-attendance.invoice.member', [
+                'member' => $memberId,
+                'month' => $this->month,
+                'year' => $this->year,
+                'participantGroup' => $group->value,
+                'schoolClassId' => $schoolClassId,
+            ]);
+        }
+
         return route('catering-attendance.invoice.member', [
             'member' => $memberId,
             'month' => $this->month,
@@ -355,6 +428,10 @@ class Index extends Component
     {
         abort_unless(auth()->check(), 403);
 
+        if ($this->selectedParticipantId !== null) {
+            return null;
+        }
+
         $group = CateringParticipantGroup::tryFrom($this->participantGroup);
 
         if (! $group?->requiresClassSelection() || $this->schoolClassId === '') {
@@ -371,6 +448,10 @@ class Index extends Component
     public function downloadAllInvoices(): ?StreamedResponse
     {
         abort_unless(auth()->check(), 403);
+
+        if ($this->selectedParticipantId !== null) {
+            return null;
+        }
 
         $this->validateSelection();
 
@@ -402,6 +483,7 @@ class Index extends Component
         abort_unless(auth()->check(), 403);
 
         $selectedGroup = CateringParticipantGroup::tryFrom($this->participantGroup);
+        $participantSearchResults = $this->participantSearchResults();
 
         return view('livewire.catering-attendance.index', [
             'monthOptions' => $this->monthOptions(),
@@ -412,6 +494,9 @@ class Index extends Component
             'requiresClassSelection' => $selectedGroup?->requiresClassSelection() ?? false,
             'statusOptions' => CateringAttendanceStatus::cases(),
             'summary' => $this->summary(),
+            'participantSearchResults' => $participantSearchResults,
+            'participantSearchActive' => $this->selectedParticipantId === null
+                && mb_strlen(trim($this->participantSearch)) >= 2,
         ]);
     }
 
@@ -485,6 +570,75 @@ class Index extends Component
             ->orderBy('id');
     }
 
+    /** @return Builder<CateringMember> */
+    private function eligibleParticipantQuery(): Builder
+    {
+        return CateringMember::query()
+            ->select(['id', 'name', 'school_class_id', 'catering_category_id'])
+            ->with([
+                'schoolClass:id,name,level,is_active',
+                'cateringCategory:id,name,participant_group',
+                'employeeAssignment:id,catering_member_id,assignment_type,school_class_id,level,education_level',
+                'employeeAssignment.schoolClass:id,name',
+            ])
+            ->active()
+            ->whereHas('cateringCategory', fn (Builder $query): Builder => $query
+                ->whereIn('participant_group', array_map(
+                    fn (CateringParticipantGroup $group): string => $group->value,
+                    CateringParticipantGroup::cases(),
+                )));
+    }
+
+    /** @return array<int, array{id: int, name: string, participant_group: string, category_name: string, context_label: string}> */
+    private function participantSearchResults(): array
+    {
+        $search = trim($this->participantSearch);
+
+        if ($this->selectedParticipantId !== null || mb_strlen($search) < 2) {
+            return [];
+        }
+
+        $escapedSearch = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $search);
+
+        return $this->eligibleParticipantQuery()
+            ->whereRaw("name LIKE ? ESCAPE '!'", ['%'.$escapedSearch.'%'])
+            ->orderBy('name')
+            ->orderBy('id')
+            ->limit(10)
+            ->get()
+            ->map(function (CateringMember $member): array {
+                $context = $this->participantContext($member);
+
+                return [
+                    'id' => $context['id'],
+                    'name' => $context['name'],
+                    'participant_group' => $context['participant_group'],
+                    'category_name' => $context['category_name'],
+                    'context_label' => $context['context_label'],
+                ];
+            })
+            ->all();
+    }
+
+    /** @return array{id: int, name: string, participant_group: string, category_name: string, context_label: string, school_class_id: int|null, school_class_is_active: bool} */
+    private function participantContext(CateringMember $member): array
+    {
+        $group = $member->cateringCategory->participant_group;
+        $schoolClass = $member->schoolClass;
+
+        return [
+            'id' => $member->id,
+            'name' => $member->name,
+            'participant_group' => $group->value,
+            'category_name' => $member->cateringCategory->name,
+            'context_label' => $group === CateringParticipantGroup::Student
+                ? ($schoolClass?->name ?? 'Tanpa kelas')
+                : ($member->employeeAssignment?->target_label ?? 'Tanpa penempatan'),
+            'school_class_id' => $schoolClass?->id,
+            'school_class_is_active' => (bool) ($schoolClass?->is_active ?? false),
+        ];
+    }
+
     private function changeMonth(int $month): void
     {
         $this->month = $month;
@@ -501,6 +655,7 @@ class Index extends Component
 
     private function changeParticipantGroup(string $participantGroup): void
     {
+        $this->forgetSelectedParticipant();
         $this->participantGroup = $participantGroup;
 
         if (CateringParticipantGroup::tryFrom($participantGroup) === null) {
@@ -516,6 +671,7 @@ class Index extends Component
 
     private function changeJenjang(string $jenjang): void
     {
+        $this->forgetSelectedParticipant();
         $this->jenjang = $jenjang;
 
         if ($jenjang === '') {
@@ -544,6 +700,7 @@ class Index extends Component
 
     private function changeSchoolClass(string $schoolClassId): void
     {
+        $this->forgetSelectedParticipant();
         $this->schoolClassId = $schoolClassId;
         $this->reloadSelectedMatrix();
     }
@@ -568,6 +725,12 @@ class Index extends Component
     private function reloadSelectedMatrix(): void
     {
         $this->resetSaveState();
+
+        if ($this->selectedParticipantId !== null) {
+            $this->loadMatrix();
+
+            return;
+        }
 
         $group = CateringParticipantGroup::tryFrom($this->participantGroup);
 
@@ -608,6 +771,32 @@ class Index extends Component
                 'schoolClassId' => ['required', 'integer'],
             ]
             : []));
+    }
+
+    private function validatePeriod(): void
+    {
+        $this->validate([
+            'month' => ['required', 'integer', 'between:1,12'],
+            'year' => ['required', 'integer', 'between:2000,2100'],
+        ]);
+    }
+
+    private function forgetSelectedParticipant(): void
+    {
+        $this->selectedParticipantId = null;
+        $this->selectedParticipant = null;
+    }
+
+    private function clearUnavailableSelectedParticipant(): void
+    {
+        $this->forgetSelectedParticipant();
+        $this->participantSearch = '';
+        $this->reloadSelectedMatrix();
+        $this->dispatch(
+            'toast',
+            type: 'warning',
+            message: 'Peserta yang dipilih sudah tidak aktif atau tidak tersedia.',
+        );
     }
 
     private function ensureCellBelongsToMatrix(int $memberId, string $date): void

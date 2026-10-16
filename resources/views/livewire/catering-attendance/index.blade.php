@@ -76,11 +76,11 @@
         ];
         $selectedClass = collect($classOptions)->firstWhere('id', (int) $schoolClassId);
         $selectedGroupLabel = $participantGroupOptions[$participantGroup] ?? 'Kelompok peserta';
-        $matrixTitle = $requiresClassSelection ? ($selectedClass['name'] ?? 'Kelas terpilih') : $selectedGroupLabel;
+        $matrixTitle = $selectedParticipant['name'] ?? ($requiresClassSelection ? ($selectedClass['name'] ?? 'Kelas terpilih') : $selectedGroupLabel);
     @endphp
 
     <section class="card card-body">
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div>
                 <label for="attendance-month" class="label">Bulan</label>
                 <select id="attendance-month" class="select" x-on:change="changeFilter('month', $event.target)">
@@ -116,6 +116,38 @@
                 @error('participantGroup')<p class="field-error">{{ $message }}</p>@enderror
             </div>
 
+            <div class="relative">
+                <label for="attendance-participant-search" class="label">Cari Peserta</label>
+                <input
+                    id="attendance-participant-search"
+                    type="search"
+                    wire:model.live.debounce.300ms="participantSearch"
+                    class="input"
+                    placeholder="Ketik minimal 2 karakter"
+                    autocomplete="off"
+                    @disabled($selectedParticipantId !== null)
+                />
+                @error('participantSearch')<p class="field-error">{{ $message }}</p>@enderror
+
+                @if ($participantSearchActive)
+                    <div class="absolute inset-x-0 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                        @forelse ($participantSearchResults as $result)
+                            <button
+                                type="button"
+                                wire:key="attendance-participant-search-{{ $result['id'] }}"
+                                wire:click="selectParticipant({{ $result['id'] }})"
+                                class="block w-full rounded-md px-3 py-2 text-left transition hover:bg-blue-50 focus-visible:bg-blue-50 focus-visible:outline-none"
+                            >
+                                <span class="block truncate text-sm font-semibold text-slate-900">{{ $result['name'] }}</span>
+                                <span class="mt-0.5 block truncate text-xs text-slate-500">{{ $result['context_label'] }} &middot; {{ $result['category_name'] }}</span>
+                            </button>
+                        @empty
+                            <p class="px-3 py-3 text-sm text-slate-500">Peserta tidak ditemukan.</p>
+                        @endforelse
+                    </div>
+                @endif
+            </div>
+
             <div @class(['hidden' => ! $requiresClassSelection])>
                 <label for="attendance-jenjang" class="label">Jenjang</label>
                 <select id="attendance-jenjang" class="select" x-on:change="changeFilter('jenjang', $event.target)">
@@ -145,6 +177,22 @@
                 @error('schoolClassId')<p class="field-error">{{ $message }}</p>@enderror
             </div>
         </div>
+
+        @if ($selectedParticipant !== null)
+            <div class="mt-4 flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Peserta dipilih</p>
+                    <p class="mt-0.5 truncate text-sm font-semibold text-slate-900">
+                        {{ $selectedParticipant['name'] }}
+                        <span class="font-normal text-slate-400">&middot;</span>
+                        <span class="font-medium text-slate-600">{{ $selectedParticipant['context_label'] }} &middot; {{ $selectedParticipant['category_name'] }}</span>
+                    </p>
+                </div>
+                <button type="button" wire:click="clearSelectedParticipant" class="btn-secondary shrink-0 whitespace-nowrap">
+                    Hapus Pilihan
+                </button>
+            </div>
+        @endif
 
         <div class="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <button
@@ -202,7 +250,7 @@
                 </p>
                 <p class="mt-1 text-sm text-slate-500">
                     @if ($participantGroup === '' || $requiresClassSelection)
-                        Matriks absensi akan muncul setelah kelompok peserta dan kelas dipilih.
+                        Matriks absensi akan muncul setelah kelompok peserta dan kelas dipilih, atau cari peserta secara langsung.
                     @else
                         Matriks absensi akan muncul setelah kelompok peserta dipilih.
                     @endif
@@ -257,40 +305,42 @@
                     </div>
 
                     <div class="flex items-center gap-3">
-                        @if ($requiresClassSelection && $schoolClassId !== '')
-                            @php
-                                $classInvoiceUrl = $this->classInvoiceUrl();
-                            @endphp
-                            @if ($classInvoiceUrl)
-                                <a
-                                    href="{{ $classInvoiceUrl }}"
-                                    target="_blank"
-                                    rel="noopener"
-                                    class="btn-secondary whitespace-nowrap"
-                                    title="Buka pratinjau PDF rekap tagihan catering kelas ini di tab baru"
-                                >
-                                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 3h9l4 4v14H6V3Z" />
-                                        <path stroke-linecap="round" d="M15 3v4h4" />
-                                    </svg>
-                                    <span>Cetak Invoice Kelas</span>
-                                </a>
+                        @if ($selectedParticipantId === null)
+                            @if ($requiresClassSelection && $schoolClassId !== '')
+                                @php
+                                    $classInvoiceUrl = $this->classInvoiceUrl();
+                                @endphp
+                                @if ($classInvoiceUrl)
+                                    <a
+                                        href="{{ $classInvoiceUrl }}"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="btn-secondary whitespace-nowrap"
+                                        title="Buka pratinjau PDF rekap tagihan catering kelas ini di tab baru"
+                                    >
+                                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3h9l4 4v14H6V3Z" />
+                                            <path stroke-linecap="round" d="M15 3v4h4" />
+                                        </svg>
+                                        <span>Cetak Invoice Kelas</span>
+                                    </a>
+                                @endif
                             @endif
+                            <button
+                                type="button"
+                                wire:click="downloadAllInvoices"
+                                wire:loading.attr="disabled"
+                                wire:target="downloadAllInvoices"
+                                class="btn-secondary whitespace-nowrap"
+                                title="Unduh satu file ZIP berisi invoice PDF individual setiap peserta pada periode ini"
+                            >
+                                <svg wire:loading.remove wire:target="downloadAllInvoices" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                                <span wire:loading.remove wire:target="downloadAllInvoices">Download Semua Invoice</span>
+                                <span wire:loading wire:target="downloadAllInvoices">Menyiapkan invoice...</span>
+                            </button>
                         @endif
-                        <button
-                            type="button"
-                            wire:click="downloadAllInvoices"
-                            wire:loading.attr="disabled"
-                            wire:target="downloadAllInvoices"
-                            class="btn-secondary whitespace-nowrap"
-                            title="Unduh satu file ZIP berisi invoice PDF individual setiap peserta pada periode ini"
-                        >
-                            <svg wire:loading.remove wire:target="downloadAllInvoices" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                            </svg>
-                            <span wire:loading.remove wire:target="downloadAllInvoices">Download Semua Invoice</span>
-                            <span wire:loading wire:target="downloadAllInvoices">Menyiapkan invoice...</span>
-                        </button>
                         <span
                             class="inline-flex min-w-28 items-center justify-end gap-1.5 text-xs font-medium"
                             role="status"
@@ -345,8 +395,8 @@
                                             x-bind:aria-expanded="bulkDate === @js($date['date'])"
                                             wire:loading.attr="disabled"
                                             class="mx-auto mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-blue-600 transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                                            title="Ubah status seluruh peserta tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
-                                            aria-label="Ubah status seluruh peserta tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
+                                            title="Ubah status peserta yang ditampilkan tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
+                                            aria-label="Ubah status peserta yang ditampilkan tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
                                             aria-haspopup="menu"
                                             aria-controls="bulk-attendance-status-picker"
                                         >
@@ -431,10 +481,10 @@
                     id="bulk-attendance-status-picker"
                     class="fixed z-[60] rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
                     role="menu"
-                    aria-label="Pilih status untuk seluruh peserta"
+                    aria-label="Pilih status untuk peserta yang ditampilkan"
                 >
                     <p class="mb-2 truncate px-1 text-xs font-semibold text-slate-700">
-                        Semua peserta &middot; <span x-text="bulkDateLabel"></span>
+                        Peserta yang ditampilkan &middot; <span x-text="bulkDateLabel"></span>
                     </p>
                     <div class="grid grid-cols-3 gap-1.5">
                         @foreach ($statusOptions as $status)

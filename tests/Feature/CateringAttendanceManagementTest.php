@@ -363,8 +363,8 @@ it('renders a compact whole date picker with every bulk status', function () {
     CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
-        ->assertSee('Ubah status seluruh peserta tanggal 1 September 2026')
-        ->assertSee('Semua peserta')
+        ->assertSee('Ubah status peserta yang ditampilkan tanggal 1 September 2026')
+        ->assertSee('Peserta yang ditampilkan')
         ->assertSee('Aktif')
         ->assertSee('Sakit')
         ->assertSee('Izin')
