@@ -6,10 +6,12 @@ use App\Livewire\CateringMemberImport;
 use App\Models\CateringCategory;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringMemberImportService;
 use App\Services\CateringMemberImportSpreadsheet;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -29,6 +31,7 @@ function cateringMemberImportRow(array $overrides = []): array
         'guardian_phone' => '081234567891',
         'phone' => '081234567890',
         'notes' => 'Tanpa alergi',
+        'tanggal_mulai' => '',
     ], $overrides);
 }
 
@@ -132,6 +135,7 @@ it('generates all required template sheets and references', function () {
         'REFERENSI KATEGORI',
         'PANDUAN',
     ])->and($sheets['DATA PESERTA'][0])->toBe(CateringMemberImportSpreadsheet::HEADERS)
+        ->and($sheets['DATA PESERTA'][0])->toContain('Tanggal Mulai')
         ->and($classNames)->toContain('VII A')
         ->and(array_search('1A', $classNames, true))->toBeLessThan(array_search('2A', $classNames, true))
         ->and(array_search('2A', $classNames, true))->toBeLessThan(array_search('10A', $classNames, true))
@@ -147,14 +151,16 @@ it('generates all required template sheets and references', function () {
         ->and($categoryRows->contains(fn (array $row): bool => $row[0] === 'TU' && $row[1] === 'Pegawai'))->toBeTrue()
         ->and($guideText)->toContain('Kelas wajib untuk kategori kelompok Siswa')
         ->and($guideText)->toContain('boleh kosong untuk kategori kelompok Pegawai')
+        ->and($guideText)->toContain('Tanggal Mulai diisi format YYYY-MM-DD')
+        ->and($guideText)->toContain('tanggal import')
         ->and($guideText)->toContain('Ahmad Fauzan 7A Siswa Umum')
         ->and($guideText)->toContain('Ustadz Hasan [kosong] Guru');
 });
 
 it('reads a valid workbook and ignores completely empty rows', function () {
     $path = cateringMemberImportWorkbook([
-        [' Arif   Test ', ' VII A ', '', 'l', ' Bapak Arif ', '0812', '0813', ' Catatan '],
-        ['', '', '', '', '', '', '', ''],
+        [' Arif   Test ', ' VII A ', '', 'l', ' Bapak Arif ', '0812', '0813', ' Catatan ', '2026-10-20'],
+        ['', '', '', '', '', '', '', '', ''],
     ]);
 
     try {
@@ -167,7 +173,23 @@ it('reads a valid workbook and ignores completely empty rows', function () {
         ->and($rows[0]['row_number'])->toBe(2)
         ->and($rows[0]['name'])->toBe('Arif Test')
         ->and($rows[0]['class_name'])->toBe('VII A')
-        ->and($rows[0]['gender'])->toBe('L');
+        ->and($rows[0]['gender'])->toBe('L')
+        ->and($rows[0]['tanggal_mulai'])->toBe('2026-10-20');
+});
+
+it('keeps legacy eight-column workbooks importable with a blank start date', function () {
+    $path = cateringMemberImportWorkbook([
+        ['Arif Test', 'VII A', '', 'L', '', '', '', ''],
+    ], CateringMemberImportSpreadsheet::LEGACY_HEADERS);
+
+    try {
+        $rows = app(CateringMemberImportSpreadsheet::class)->read($path);
+    } finally {
+        @unlink($path);
+    }
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['tanggal_mulai'])->toBe('');
 });
 
 it('rejects a workbook with invalid headers', function () {
@@ -258,6 +280,7 @@ it('imports employee categories without a class', function (string $categoryName
             'name' => 'Ustadz '.$categoryName,
             'class_name' => '',
             'category_name' => $categoryName,
+            'tanggal_mulai' => '2026-10-20',
         ]),
     ]);
 
@@ -269,6 +292,8 @@ it('imports employee categories without a class', function (string $categoryName
     expect($result['total'])->toBe(1)
         ->and($member->school_class_id)->toBeNull()
         ->and($member->cateringCategory->participant_group)->toBe(CateringParticipantGroup::Employee)
+        ->and($member->periods()->sole()->start_date->toDateString())->toBe('2026-10-20')
+        ->and($member->periods()->sole()->end_date)->toBeNull()
         ->and(CateringEmployeeAssignment::query()->count())->toBe(0);
 })->with([
     'Guru' => ['Guru'],
@@ -334,6 +359,16 @@ it('validates optional gender and field lengths', function () {
         ->and($preview['rows'][0]['errors'])->not->toBeEmpty();
 });
 
+it('rejects an invalid tanggal mulai with a clear row error', function () {
+    $preview = app(CateringMemberImportService::class)->preview([
+        cateringMemberImportRow(['tanggal_mulai' => '20/10/2026']),
+    ]);
+
+    expect($preview['has_errors'])->toBeTrue()
+        ->and($preview['rows'][0]['status'])->toBe('error')
+        ->and($preview['rows'][0]['errors'])->toContain('Tanggal Mulai harus berformat YYYY-MM-DD.');
+});
+
 it('blocks duplicate name and class inside the uploaded file', function () {
     $preview = app(CateringMemberImportService::class)->preview([
         cateringMemberImportRow(),
@@ -361,6 +396,27 @@ it('blocks duplicate name and class already in the database', function () {
 
     expect($preview['has_errors'])->toBeTrue()
         ->and($preview['rows'][0]['status_label'])->toContain('sudah terdaftar');
+});
+
+it('does not create another period when a duplicate row is rejected', function () {
+    $member = CateringMember::factory()->create([
+        'name' => 'Arif Test',
+        'school_class_id' => $this->schoolClass->id,
+        'catering_category_id' => $this->defaultCategory->id,
+    ]);
+    CateringMemberPeriod::query()->create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-09-01',
+        'end_date' => null,
+    ]);
+
+    expect(fn () => app(CateringMemberImportService::class)->import([
+        cateringMemberImportRow(['tanggal_mulai' => '2026-10-20']),
+    ]))->toThrow(ValidationException::class);
+
+    expect(CateringMember::query()->count())->toBe(1)
+        ->and($member->periods()->count())->toBe(1)
+        ->and($member->periods()->sole()->start_date->toDateString())->toBe('2026-09-01');
 });
 
 it('blocks duplicate employee name within the same category', function () {
@@ -415,7 +471,37 @@ it('blocks the complete import when any row has an error', function () {
         cateringMemberImportRow(['row_number' => 3, 'name' => 'Error Test', 'class_name' => 'DOES NOT EXIST']),
     ]))->toThrow(ValidationException::class);
 
-    expect(CateringMember::query()->count())->toBe(0);
+    expect(CateringMember::query()->count())->toBe(0)
+        ->and(CateringMemberPeriod::query()->count())->toBe(0);
+});
+
+it('creates an open membership period from tanggal mulai for a new imported participant', function () {
+    app(CateringMemberImportService::class)->import([
+        cateringMemberImportRow(['tanggal_mulai' => '2026-10-20']),
+    ]);
+
+    $member = CateringMember::query()->where('name', 'Arif Test')->sole();
+    $period = $member->periods()->sole();
+
+    expect($period->start_date->toDateString())->toBe('2026-10-20')
+        ->and($period->end_date)->toBeNull();
+});
+
+it('defaults a blank tanggal mulai to the import date', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-10-17 09:00:00'));
+
+    try {
+        app(CateringMemberImportService::class)->import([
+            cateringMemberImportRow(['tanggal_mulai' => '']),
+        ]);
+    } finally {
+        $this->travelBack();
+    }
+
+    $member = CateringMember::query()->where('name', 'Arif Test')->sole();
+
+    expect($member->periods()->sole()->start_date->toDateString())->toBe('2026-10-17')
+        ->and($member->periods()->sole()->end_date)->toBeNull();
 });
 
 it('imports all valid fields and category breakdown in one transaction', function () {
@@ -469,7 +555,27 @@ it('rolls back every member when a later insert fails unexpectedly', function ()
         CateringMember::setEventDispatcher($originalDispatcher);
     }
 
-    expect(CateringMember::query()->count())->toBe(0);
+    expect(CateringMember::query()->count())->toBe(0)
+        ->and(CateringMemberPeriod::query()->count())->toBe(0);
+});
+
+it('rolls back an imported member when its membership period cannot be created', function () {
+    $originalDispatcher = clone CateringMemberPeriod::getEventDispatcher();
+
+    CateringMemberPeriod::creating(function (): never {
+        throw new RuntimeException('Simulated period failure.');
+    });
+
+    try {
+        expect(fn () => app(CateringMemberImportService::class)->import([
+            cateringMemberImportRow(['tanggal_mulai' => '2026-10-20']),
+        ]))->toThrow(RuntimeException::class, 'Simulated period failure.');
+    } finally {
+        CateringMemberPeriod::setEventDispatcher($originalDispatcher);
+    }
+
+    expect(CateringMember::query()->count())->toBe(0)
+        ->and(CateringMemberPeriod::query()->count())->toBe(0);
 });
 
 it('previews and imports a workbook through the Livewire flow', function () {

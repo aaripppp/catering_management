@@ -6,17 +6,22 @@ use App\Enums\CateringEmployeeAssignmentType;
 use App\Enums\CateringParticipantGroup;
 use App\Enums\Gender;
 use App\Enums\SchoolLevel;
-use App\Models\CateringAttendance;
+use App\Exceptions\CateringMemberDeletionException;
 use App\Models\CateringCategory;
-use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
+use App\Services\CateringBillingService;
+use App\Services\CateringMemberDeletionService;
+use App\Services\CateringMembershipService;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -60,6 +65,13 @@ class Index extends Component
 
     public bool $is_active = true;
 
+    /**
+     * Participation start date for a brand new participant. It becomes the
+     * opening catering_member_periods row. Editing never touches membership,
+     * so this field is only shown and used while creating a member.
+     */
+    public string $mulai_catering = '';
+
     // Employee placement. Only used when the chosen category declares the
     // employee participant group; students keep using school_class_id.
     public string $employee_assignment_type = '';
@@ -80,6 +92,36 @@ class Index extends Component
     public int $deletingMemberCount = 0;
 
     public bool $isBulkDelete = false;
+
+    // Membership (participation date) modals. These are kept separate from the
+    // master is_active flag: a member can be active but not currently
+    // participating, or participating while archived.
+    public bool $showStopModal = false;
+
+    public ?int $stoppingId = null;
+
+    public string $stoppingName = '';
+
+    public string $stoppingStart = '';
+
+    public string $tanggal_terakhir = '';
+
+    public bool $showRejoinModal = false;
+
+    public ?int $rejoiningId = null;
+
+    public string $rejoiningName = '';
+
+    public string $mulai_catering_lagi = '';
+
+    public bool $showHistoryModal = false;
+
+    public ?int $historyId = null;
+
+    public string $historyName = '';
+
+    /** @var array<int, array{start: string, end: ?string}> */
+    public array $historyPeriods = [];
 
     public function updatedSearch(): void
     {
@@ -206,7 +248,7 @@ class Index extends Component
         $this->resetForm();
     }
 
-    public function save(): void
+    public function save(CateringMembershipService $membershipService): void
     {
         $cateringMember = $this->editingId
             ? CateringMember::findOrFail($this->editingId)
@@ -218,14 +260,27 @@ class Index extends Component
 
         $validated = $this->validate($this->rules($isEmployee));
 
-        $cateringMember->fill([
-            ...$validated,
-            'school_class_id' => $validated['school_class_id'] !== '' ? (int) $validated['school_class_id'] : null,
-            'catering_category_id' => (int) $validated['catering_category_id'],
-            'gender' => $validated['gender'] !== '' ? $validated['gender'] : null,
-        ])->save();
+        $mulaiCatering = (string) ($validated['mulai_catering'] ?? '');
+        unset($validated['mulai_catering']);
+        $isNewMember = $this->editingId === null;
 
-        $this->syncEmployeeAssignment($cateringMember, $isEmployee, $validated);
+        // The member row and its opening membership period are one unit of work:
+        // a failure while opening the period must not leave a half-created
+        // participant behind.
+        DB::transaction(function () use ($cateringMember, $validated, $isEmployee, $isNewMember, $mulaiCatering, $membershipService): void {
+            $cateringMember->fill([
+                ...$validated,
+                'school_class_id' => $validated['school_class_id'] !== '' ? (int) $validated['school_class_id'] : null,
+                'catering_category_id' => (int) $validated['catering_category_id'],
+                'gender' => $validated['gender'] !== '' ? $validated['gender'] : null,
+            ])->save();
+
+            $this->syncEmployeeAssignment($cateringMember, $isEmployee, $validated);
+
+            if ($isNewMember && $mulaiCatering !== '') {
+                $membershipService->start($cateringMember->id, CarbonImmutable::parse($mulaiCatering));
+            }
+        });
 
         $this->dispatch(
             'toast',
@@ -260,6 +315,10 @@ class Index extends Component
             'guardian_phone' => ['nullable', 'string', 'max:30'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['boolean'],
+            // Membership only starts at creation; edits never touch periods.
+            'mulai_catering' => $this->editingId === null
+                ? ['required', 'date']
+                : ['nullable'],
             'employee_assignment_type' => $isEmployee
                 ? ['required', Rule::enum(CateringEmployeeAssignmentType::class)]
                 : ['prohibited'],
@@ -404,6 +463,9 @@ class Index extends Component
         $this->guardian_phone = '';
         $this->notes = '';
         $this->is_active = true;
+        // New participants choose their own start date; default to today so the
+        // admin can adjust it without ever inheriting created_at or 2026-09-01.
+        $this->mulai_catering = CarbonImmutable::now()->toDateString();
         $this->resetEmployeeAssignment();
         $this->resetValidation();
     }
@@ -471,6 +533,7 @@ class Index extends Component
 
         Gate::authorize('delete', $cateringMember);
 
+        $this->resetErrorBag('delete');
         $this->deletingId = $cateringMember->id;
         $this->deletingName = $cateringMember->name;
         $this->deletingMemberCount = 1;
@@ -487,14 +550,20 @@ class Index extends Component
         $this->isBulkDelete = false;
     }
 
-    public function deleteConfirmed(): void
+    public function deleteConfirmed(CateringMemberDeletionService $deletionService): void
     {
         $wasBulkDelete = $this->isBulkDelete;
         $requestedIds = $this->isBulkDelete
             ? $this->normalisedSelectedIds()
             : array_filter([$this->deletingId]);
 
-        $deletedCount = $this->deleteMembers($requestedIds, $this->isBulkDelete);
+        try {
+            $deletedCount = $this->deleteMembers($requestedIds, $this->isBulkDelete, $deletionService);
+        } catch (CateringMemberDeletionException $exception) {
+            $this->addError('delete', $exception->getMessage());
+
+            return;
+        }
 
         if ($deletedCount > 0) {
             $this->dispatch(
@@ -509,6 +578,158 @@ class Index extends Component
         $this->closeDeleteModal();
         $this->selectedIds = [];
         $this->resetPage();
+    }
+
+    // ===== MEMBERSHIP (PARTICIPATION PERIODS) =====
+
+    public function openStopModal(int $cateringMemberId): void
+    {
+        $cateringMember = CateringMember::findOrFail($cateringMemberId);
+        Gate::authorize('update', $cateringMember);
+
+        $openPeriod = $cateringMember->periods()->whereNull('end_date')->first();
+
+        if ($openPeriod === null) {
+            $this->addError('membership', 'Peserta tidak memiliki periode keikutsertaan yang sedang berjalan.');
+
+            return;
+        }
+
+        $this->resetErrorBag('membership');
+        $this->stoppingId = $cateringMember->id;
+        $this->stoppingName = $cateringMember->name;
+        $this->stoppingStart = $openPeriod->start_date->locale('id')->translatedFormat('d F Y');
+        $this->tanggal_terakhir = '';
+        $this->showStopModal = true;
+    }
+
+    public function closeStopModal(): void
+    {
+        $this->showStopModal = false;
+        $this->stoppingId = null;
+        $this->stoppingName = '';
+        $this->stoppingStart = '';
+        $this->tanggal_terakhir = '';
+        $this->resetValidation();
+    }
+
+    public function stopCatering(
+        CateringMembershipService $membershipService,
+        CateringBillingService $billingService,
+    ): void {
+        if ($this->stoppingId === null) {
+            return;
+        }
+
+        $cateringMember = CateringMember::findOrFail($this->stoppingId);
+        Gate::authorize('update', $cateringMember);
+
+        $validated = $this->validate([
+            'tanggal_terakhir' => ['required', 'date'],
+        ], [
+            'tanggal_terakhir.required' => 'Tanggal terakhir ikut catering wajib diisi.',
+        ]);
+
+        try {
+            $endDate = CarbonImmutable::parse($validated['tanggal_terakhir']);
+            DB::transaction(function () use ($membershipService, $billingService, $cateringMember, $endDate): void {
+                $membershipService->stop($cateringMember->id, $endDate);
+                $billingService->resynchronizeExistingBillsFrom($cateringMember->id, $endDate, auth()->user());
+            });
+        } catch (InvalidArgumentException $exception) {
+            $this->addError('membership', $exception->getMessage());
+
+            return;
+        }
+
+        $this->dispatch('toast', type: 'success', message: 'Keikutsertaan '.$cateringMember->name.' dihentikan.');
+        $this->closeStopModal();
+    }
+
+    public function openRejoinModal(int $cateringMemberId): void
+    {
+        $cateringMember = CateringMember::findOrFail($cateringMemberId);
+        Gate::authorize('update', $cateringMember);
+
+        if ($cateringMember->periods()->whereNull('end_date')->exists()) {
+            $this->addError('membership', 'Peserta masih memiliki periode keikutsertaan yang sedang berjalan.');
+
+            return;
+        }
+
+        $this->resetErrorBag('membership');
+        $this->rejoiningId = $cateringMember->id;
+        $this->rejoiningName = $cateringMember->name;
+        $this->mulai_catering_lagi = CarbonImmutable::now()->toDateString();
+        $this->showRejoinModal = true;
+    }
+
+    public function closeRejoinModal(): void
+    {
+        $this->showRejoinModal = false;
+        $this->rejoiningId = null;
+        $this->rejoiningName = '';
+        $this->mulai_catering_lagi = '';
+        $this->resetValidation();
+    }
+
+    public function rejoinCatering(
+        CateringMembershipService $membershipService,
+        CateringBillingService $billingService,
+    ): void {
+        if ($this->rejoiningId === null) {
+            return;
+        }
+
+        $cateringMember = CateringMember::findOrFail($this->rejoiningId);
+        Gate::authorize('update', $cateringMember);
+
+        $validated = $this->validate([
+            'mulai_catering_lagi' => ['required', 'date'],
+        ], [
+            'mulai_catering_lagi.required' => 'Tanggal mulai catering lagi wajib diisi.',
+        ]);
+
+        try {
+            $startDate = CarbonImmutable::parse($validated['mulai_catering_lagi']);
+            DB::transaction(function () use ($membershipService, $billingService, $cateringMember, $startDate): void {
+                $membershipService->rejoin($cateringMember->id, $startDate);
+                $billingService->resynchronizeExistingBillsFrom($cateringMember->id, $startDate, auth()->user());
+            });
+        } catch (InvalidArgumentException $exception) {
+            $this->addError('membership', $exception->getMessage());
+
+            return;
+        }
+
+        $this->dispatch('toast', type: 'success', message: 'Keikutsertaan '.$cateringMember->name.' dimulai kembali.');
+        $this->closeRejoinModal();
+    }
+
+    public function openHistoryModal(int $cateringMemberId): void
+    {
+        $cateringMember = CateringMember::findOrFail($cateringMemberId);
+        Gate::authorize('view', $cateringMember);
+
+        $this->historyId = $cateringMember->id;
+        $this->historyName = $cateringMember->name;
+        $this->historyPeriods = $cateringMember->periods()
+            ->orderByDesc('start_date')
+            ->get()
+            ->map(fn (CateringMemberPeriod $period): array => [
+                'start' => $period->start_date->locale('id')->translatedFormat('d F Y'),
+                'end' => $period->end_date?->locale('id')->translatedFormat('d F Y'),
+            ])
+            ->all();
+        $this->showHistoryModal = true;
+    }
+
+    public function closeHistoryModal(): void
+    {
+        $this->showHistoryModal = false;
+        $this->historyId = null;
+        $this->historyName = '';
+        $this->historyPeriods = [];
     }
 
     public function render(): View
@@ -533,6 +754,7 @@ class Index extends Component
                 'cateringCategory:id,name',
                 'employeeAssignment:id,catering_member_id,assignment_type,school_class_id,level,education_level',
                 'employeeAssignment.schoolClass:id,name',
+                'periods:id,catering_member_id,start_date,end_date',
             ])
             ->paginate(10);
 
@@ -613,36 +835,33 @@ class Index extends Component
     /**
      * @param  array<int, int>  $requestedIds
      */
-    private function deleteMembers(array $requestedIds, bool $applyCurrentFilters): int
-    {
+    private function deleteMembers(
+        array $requestedIds,
+        bool $applyCurrentFilters,
+        CateringMemberDeletionService $deletionService,
+    ): int {
         if ($requestedIds === []) {
             return 0;
         }
 
-        return DB::transaction(function () use ($requestedIds, $applyCurrentFilters): int {
-            $query = $applyCurrentFilters
-                ? $this->filteredMembersQuery()
-                : CateringMember::query();
+        $query = $applyCurrentFilters
+            ? $this->filteredMembersQuery()
+            : CateringMember::query();
 
-            $members = $query
-                ->whereKey($requestedIds)
-                ->get(['id']);
+        $members = $query
+            ->whereKey($requestedIds)
+            ->get(['id']);
 
-            foreach ($members as $member) {
-                Gate::authorize('delete', $member);
-            }
+        foreach ($members as $member) {
+            Gate::authorize('delete', $member);
+        }
 
-            $ids = $members->modelKeys();
+        $ids = $members->modelKeys();
 
-            if ($ids === []) {
-                return 0;
-            }
+        if ($ids === []) {
+            return 0;
+        }
 
-            CateringAttendance::query()->whereIn('catering_member_id', $ids)->delete();
-            CateringEmployeeAssignment::query()->whereIn('catering_member_id', $ids)->delete();
-            CateringMember::query()->whereKey($ids)->delete();
-
-            return count($ids);
-        });
+        return $deletionService->deleteMany($ids);
     }
 }

@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\CateringParticipantGroup;
 use App\Enums\Gender;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Database\Factories\CateringMemberFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -66,6 +68,14 @@ class CateringMember extends Model
         return $this->hasMany(CateringAttendance::class);
     }
 
+    /**
+     * @return HasMany<CateringMemberPeriod, $this>
+     */
+    public function periods(): HasMany
+    {
+        return $this->hasMany(CateringMemberPeriod::class);
+    }
+
     /** @return HasMany<CateringBill, $this> */
     public function bills(): HasMany
     {
@@ -123,5 +133,36 @@ class CateringMember extends Model
             'cateringCategory',
             fn (Builder $categoryQuery) => $categoryQuery->where('participant_group', $value),
         );
+    }
+
+    /**
+     * @param  Builder<CateringMember>  $query
+     * @return Builder<CateringMember>
+     */
+    public function scopeParticipatingBetween(
+        Builder $query,
+        CarbonInterface|string $start,
+        CarbonInterface|string $end,
+    ): Builder {
+        $startDate = CarbonImmutable::parse($start)->toDateString();
+        $endDate = CarbonImmutable::parse($end)->toDateString();
+
+        return $query->whereHas('periods', function (Builder $periods) use ($startDate, $endDate): void {
+            $periods
+                ->whereDate('start_date', '<=', $endDate)
+                ->where(function (Builder $query) use ($startDate): void {
+                    $query->whereNull('end_date')
+                        ->orWhereDate('end_date', '>=', $startDate);
+                });
+        });
+    }
+
+    /**
+     * @param  Builder<CateringMember>  $query
+     * @return Builder<CateringMember>
+     */
+    public function scopeParticipatingOn(Builder $query, CarbonInterface|string $date): Builder
+    {
+        return $query->participatingBetween($date, $date);
     }
 }

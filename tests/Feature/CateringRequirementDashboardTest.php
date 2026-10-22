@@ -7,6 +7,7 @@ use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringRequirementRecapService;
@@ -19,23 +20,37 @@ const RECAP_DATE = '2026-09-30';
 
 function recapStudent(string $name, SchoolClass $schoolClass, ?CateringCategory $category = null): CateringMember
 {
-    return CateringMember::factory()->create([
+    $member = CateringMember::factory()->create([
         'name' => $name,
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => ($category ?? CateringCategory::factory()->student()->create())->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+
+    return $member;
 }
 
 function recapEmployee(string $name, ?CateringCategory $category = null): CateringMember
 {
-    return CateringMember::factory()->withoutClass()->create([
+    $member = CateringMember::factory()->withoutClass()->create([
         'name' => $name,
         'catering_category_id' => ($category ?? CateringCategory::factory()->employee()->create())->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+
+    return $member;
 }
 
 function saveAttendance(CateringMember $member, string $date, CateringAttendanceStatus $status): CateringAttendance
 {
+    if (! $member->periods()->exists()) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $member->id,
+            'start_date' => $date,
+            'end_date' => null,
+        ]);
+    }
+
     return CateringAttendance::factory()->create([
         'catering_member_id' => $member->id,
         'attendance_date' => $date,
@@ -237,6 +252,37 @@ it('only reads attendance for the single selected date', function () {
     expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(1)
         ->and(recapFor('2026-09-29')['totalPortions'])->toBe(1)
         ->and(recapFor('2026-09-28')['totalPortions'])->toBe(0);
+});
+
+it('ignores stored attendance after the membership end date in portions stats and participant coverage', function () {
+    $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
+    $student = CateringMember::factory()->create([
+        'name' => 'Siswa Berhenti',
+        'school_class_id' => $class->id,
+        'catering_category_id' => CateringCategory::factory()->student()->create()->id,
+    ]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $student->id,
+        'start_date' => '2026-09-15',
+        'end_date' => '2026-09-30',
+    ]);
+    saveAttendance($student, '2026-09-30', CateringAttendanceStatus::Ikut);
+    saveAttendance($student, '2026-10-01', CateringAttendanceStatus::Ikut);
+
+    $beforeMembership = recapFor('2026-09-14');
+    $lastCoveredDay = recapFor('2026-09-30');
+    $afterMembership = recapFor('2026-10-01');
+
+    expect(CateringAttendance::query()->where('catering_member_id', $student->id)->count())->toBe(2);
+    expect($beforeMembership['activeParticipants'])->toBe(0);
+    expect($lastCoveredDay['activeParticipants'])->toBe(1)
+        ->and($lastCoveredDay['totalPortions'])->toBe(1)
+        ->and($lastCoveredDay['savedRows'])->toBe(1)
+        ->and($lastCoveredDay['hasSavedData'])->toBeTrue();
+    expect($afterMembership['activeParticipants'])->toBe(0)
+        ->and($afterMembership['totalPortions'])->toBe(0)
+        ->and($afterMembership['savedRows'])->toBe(0)
+        ->and($afterMembership['hasSavedData'])->toBeFalse();
 });
 
 /*

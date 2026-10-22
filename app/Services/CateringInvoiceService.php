@@ -11,6 +11,7 @@ use App\Models\SchoolClass;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Number;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,6 +27,8 @@ class CateringInvoiceService
      * Only the "ikut" status contributes to the billed catering quantity.
      */
     private const BILLABLE_STATUS = CateringAttendanceStatus::Ikut;
+
+    private const CLASS_INVOICE_CATEGORY = 'Siswa Umum';
 
     private const LOGO_MAX_WIDTH = 160;
 
@@ -58,15 +61,16 @@ class CateringInvoiceService
         CarbonImmutable $end,
     ): array {
         $rowsByMember = $this->attendanceRowsForMembers([$member->id], $start, $end);
-        $bill = CateringBill::query()
-            ->where('catering_member_id', $member->id)
-            ->where('period_month', $start->month)
-            ->where('period_year', $start->year)
-            ->withSum('payments as paid_amount', 'amount')
-            ->withSum('creditAllocations as credit_applied_amount', 'amount')
-            ->first();
+        [$currentBills, $outstandingByMember] = $this->billsForMembers([$member->id], $start);
 
-        return $this->composeInvoice($member, $rowsByMember[$member->id] ?? [], $start, $end, $bill);
+        return $this->composeInvoice(
+            $member,
+            $rowsByMember[$member->id] ?? [],
+            $start,
+            $end,
+            $currentBills->get($member->id),
+            $outstandingByMember->get($member->id, 0),
+        );
     }
 
     /**
@@ -84,9 +88,13 @@ class CateringInvoiceService
     ): array {
         $members = CateringMember::query()
             ->select(['id', 'name', 'school_class_id', 'catering_category_id'])
-            ->with(['cateringCategory:id,price_per_day,participant_group'])
+            ->with(['cateringCategory:id,name,price_per_day,participant_group'])
             ->active()
             ->participantGroup(CateringParticipantGroup::Student)
+            ->whereHas(
+                'cateringCategory',
+                fn (Builder $query): Builder => $query->where('name', self::CLASS_INVOICE_CATEGORY),
+            )
             ->where('school_class_id', $schoolClass->id)
             ->orderBy('name')
             ->orderBy('id')
@@ -95,17 +103,12 @@ class CateringInvoiceService
         $rowsByMember = $members->isEmpty()
             ? []
             : $this->attendanceRowsForMembers($members->pluck('id')->all(), $start, $end);
-        $billsByMember = CateringBill::query()
-            ->whereIn('catering_member_id', $members->pluck('id'))
-            ->where('period_month', $start->month)
-            ->where('period_year', $start->year)
-            ->withSum('payments as paid_amount', 'amount')
-            ->withSum('creditAllocations as credit_applied_amount', 'amount')
-            ->get()
-            ->keyBy('catering_member_id');
+        [$currentBills, $outstandingByMember] = $this->billsForMembers($members->pluck('id')->all(), $start);
 
         $rows = [];
         $grandTotal = 0;
+        $totalOutstandingTotal = 0;
+        $totalDue = 0;
         $totals = array_fill_keys(array_map(
             fn (CateringAttendanceStatus $status): string => $status->value,
             CateringAttendanceStatus::cases(),
@@ -115,15 +118,19 @@ class CateringInvoiceService
 
         foreach ($members as $member) {
             $memberRows = $rowsByMember[$member->id] ?? [];
-            $bill = $billsByMember->get($member->id);
+            $bill = $currentBills->get($member->id);
+            $totalOutstanding = $outstandingByMember->get($member->id, 0);
             $counts = $bill === null
                 ? $this->statusCounts($this->invoiceVisibleRows($memberRows))
                 : $this->billStatusCounts($bill);
             $pricePerDay = $bill?->price_per_day ?? (int) ($member->cateringCategory?->price_per_day ?? 0);
             $total = $bill?->gross_amount ?? ($counts[self::BILLABLE_STATUS->value] * $pricePerDay);
+            $memberTotalDue = $total + $totalOutstanding;
 
             $savedDays += $bill?->saved_days ?? count($memberRows);
             $grandTotal += $total;
+            $totalOutstandingTotal += $totalOutstanding;
+            $totalDue += $memberTotalDue;
 
             foreach ($totals as $statusValue => $count) {
                 $totals[$statusValue] += $counts[$statusValue];
@@ -146,15 +153,33 @@ class CateringInvoiceService
                 'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
                 'total' => $total,
                 'totalFormatted' => $this->formatRupiah($total),
+                'totalOutstanding' => $totalOutstanding,
+                'totalOutstandingFormatted' => $this->formatRupiah($totalOutstanding),
+                'totalDue' => $memberTotalDue,
+                'totalDueFormatted' => $this->formatRupiah($memberTotalDue),
             ];
         }
+
+        $invoiceDate = $this->invoiceDate($start);
+        $dueDate = $this->dueDate($start);
+        $confirmationExample = $rows === []
+            ? null
+            : sprintf(
+                '%s - %s - %s %d - SUDAH TRANSFER',
+                mb_strtoupper($rows[0]['memberName']),
+                mb_strtoupper($schoolClass->name),
+                mb_strtoupper(self::MONTH_NAMES[$start->month]),
+                $start->year,
+            );
 
         return [
             'classId' => $schoolClass->id,
             'className' => $schoolClass->name,
             'level' => (string) $schoolClass->level,
             'invoiceNumber' => $invoiceNumber,
-            'invoiceDate' => now()->format('d/m/Y'),
+            'invoiceDate' => $invoiceDate->format('d/m/Y'),
+            'dueDate' => $dueDate->format('d/m/Y'),
+            'dueDateFormatted' => $this->formatIndonesianDate($dueDate),
             'month' => $start->month,
             'year' => $start->year,
             'periodLabel' => $this->periodLabel($start, $end),
@@ -164,6 +189,10 @@ class CateringInvoiceService
             'savedDays' => $savedDays,
             'grandTotal' => $grandTotal,
             'grandTotalFormatted' => $this->formatRupiah($grandTotal),
+            'totalOutstandingTotal' => $totalOutstandingTotal,
+            'totalOutstandingTotalFormatted' => $this->formatRupiah($totalOutstandingTotal),
+            'totalDue' => $totalDue,
+            'totalDueFormatted' => $this->formatRupiah($totalDue),
             'totalIkut' => $totals[self::BILLABLE_STATUS->value],
             'totalSakit' => $totals[CateringAttendanceStatus::Sakit->value],
             'totalIzin' => $totals[CateringAttendanceStatus::Izin->value],
@@ -174,12 +203,8 @@ class CateringInvoiceService
             'totalPuasa' => $totals[CateringAttendanceStatus::Puasa->value],
             'totalLibur' => $totals[CateringAttendanceStatus::Libur->value],
             'payment' => $this->paymentDetails(),
-            'confirmationReference' => sprintf(
-                '%s - %s %d - SUDAH TRANSFER',
-                mb_strtoupper($schoolClass->name),
-                mb_strtoupper(self::MONTH_NAMES[$start->month]),
-                $start->year,
-            ),
+            'confirmationFormat' => 'NAMA SISWA - KELAS - BULAN TAHUN - SUDAH TRANSFER',
+            'confirmationReference' => $confirmationExample,
             'logoDataUri' => $this->logoDataUri(),
         ];
     }
@@ -220,14 +245,7 @@ class CateringInvoiceService
             $start,
             $end,
         );
-        $billsByMember = CateringBill::query()
-            ->whereIn('catering_member_id', $members->pluck('id'))
-            ->where('period_month', $start->month)
-            ->where('period_year', $start->year)
-            ->withSum('payments as paid_amount', 'amount')
-            ->withSum('creditAllocations as credit_applied_amount', 'amount')
-            ->get()
-            ->keyBy('catering_member_id');
+        [$currentBills, $outstandingByMember] = $this->billsForMembers($members->pluck('id')->all(), $start);
 
         return $members
             ->map(fn (CateringMember $member): array => $this->composeInvoice(
@@ -235,7 +253,8 @@ class CateringInvoiceService
                 rows: $rowsByMember[$member->id] ?? [],
                 start: $start,
                 end: $end,
-                bill: $billsByMember->get($member->id),
+                bill: $currentBills->get($member->id),
+                totalOutstanding: $outstandingByMember->get($member->id, 0),
             ))
             ->values()
             ->all();
@@ -261,7 +280,7 @@ class CateringInvoiceService
     public function renderClassPdf(array $invoice): string
     {
         return Pdf::loadView('pdf.catering.invoice-class', $invoice)
-            ->setPaper('a4', 'portrait')
+            ->setPaper('a4', 'landscape')
             ->output();
     }
 
@@ -410,6 +429,7 @@ class CateringInvoiceService
         $grouped = [];
 
         CateringAttendance::query()
+            ->coveredByMembership()
             ->select(['catering_member_id', 'attendance_date', 'status'])
             ->whereIn('catering_member_id', $memberIds)
             ->where('attendance_date', '>=', $start->toDateString())
@@ -466,6 +486,7 @@ class CateringInvoiceService
         CarbonImmutable $start,
         CarbonImmutable $end,
         ?CateringBill $bill = null,
+        int $totalOutstanding = 0,
     ): array {
         $category = $member->relationLoaded('cateringCategory')
             ? $member->cateringCategory
@@ -482,7 +503,10 @@ class CateringInvoiceService
         $className = $usesClass ? ($member->schoolClass?->name ?? '-') : $group->label();
         $isEmployee = $group === CateringParticipantGroup::Employee;
         $total = $bill?->gross_amount ?? ($quantity * $pricePerDay);
+        $totalDue = $total + $totalOutstanding;
         $invoiceNumber = sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id);
+        $invoiceDate = $this->invoiceDate($start);
+        $dueDate = $this->dueDate($start);
 
         return [
             'memberId' => $member->id,
@@ -490,7 +514,9 @@ class CateringInvoiceService
             'guardianName' => $member->guardian_name,
             'guardianPhone' => $member->guardian_phone,
             'invoiceNumber' => $invoiceNumber,
-            'invoiceDate' => now()->format('d/m/Y'),
+            'invoiceDate' => $invoiceDate->format('d/m/Y'),
+            'dueDate' => $dueDate->format('d/m/Y'),
+            'dueDateFormatted' => $this->formatIndonesianDate($dueDate),
             'month' => $start->month,
             'year' => $start->year,
             'periodLabel' => $this->periodLabel($start, $end),
@@ -511,6 +537,10 @@ class CateringInvoiceService
             'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
             'total' => $total,
             'totalFormatted' => $this->formatRupiah($total),
+            'totalOutstanding' => $totalOutstanding,
+            'totalOutstandingFormatted' => $this->formatRupiah($totalOutstanding),
+            'totalDue' => $totalDue,
+            'totalDueFormatted' => $this->formatRupiah($totalDue),
             'paymentStatusLabel' => $bill?->payment_status->label(),
             'paidAmount' => $bill?->paidAmount() ?? 0,
             'paidAmountFormatted' => $this->formatRupiah($bill?->paidAmount() ?? 0),
@@ -528,9 +558,11 @@ class CateringInvoiceService
             'countLibur' => $counts[CateringAttendanceStatus::Libur->value],
             'payment' => $this->paymentDetails(),
             'confirmationReference' => sprintf(
-                '%s - %s - SUDAH TRANSFER',
+                '%s - %s - %s %d - SUDAH TRANSFER',
                 mb_strtoupper($member->name),
                 mb_strtoupper($className),
+                mb_strtoupper(self::MONTH_NAMES[$start->month]),
+                $start->year,
             ),
             'logoDataUri' => $this->logoDataUri(),
         ];
@@ -550,6 +582,61 @@ class CateringInvoiceService
             CateringAttendanceStatus::Puasa->value => $bill->puasa_days,
             CateringAttendanceStatus::Libur->value => $bill->libur_days,
         ];
+    }
+
+    /**
+     * Load current and all prior bills, including financial aggregates, in one query.
+     *
+     * @param  array<int, int>  $memberIds
+     * @return array{0: Collection<int, CateringBill>, 1: Collection<int, int>}
+     */
+    private function billsForMembers(array $memberIds, CarbonImmutable $start): array
+    {
+        if ($memberIds === []) {
+            return [collect(), collect()];
+        }
+
+        $bills = CateringBill::query()
+            ->whereIn('catering_member_id', $memberIds)
+            ->where(function (Builder $query) use ($start): void {
+                $query->where('period_year', '<', $start->year)
+                    ->orWhere(function (Builder $query) use ($start): void {
+                        $query->where('period_year', $start->year)
+                            ->where('period_month', '<=', $start->month);
+                    });
+            })
+            ->withSum('payments as paid_amount', 'amount')
+            ->withSum('creditAllocations as credit_applied_amount', 'amount')
+            ->get();
+
+        $currentBills = $bills
+            ->where('period_month', $start->month)
+            ->where('period_year', $start->year)
+            ->keyBy('catering_member_id');
+        $outstandingByMember = $bills
+            ->reject(fn (CateringBill $bill): bool => $bill->period_month === $start->month
+                && $bill->period_year === $start->year)
+            ->groupBy('catering_member_id')
+            ->map(fn (Collection $bills): int => $bills->sum(
+                fn (CateringBill $bill): int => $bill->remainingAmount(),
+            ));
+
+        return [$currentBills, $outstandingByMember];
+    }
+
+    private function invoiceDate(CarbonImmutable $start): CarbonImmutable
+    {
+        return $start->addMonth()->startOfMonth();
+    }
+
+    private function dueDate(CarbonImmutable $start): CarbonImmutable
+    {
+        return $this->invoiceDate($start)->setDay(28);
+    }
+
+    private function formatIndonesianDate(CarbonImmutable $date): string
+    {
+        return sprintf('%d %s %d', $date->day, self::MONTH_NAMES[$date->month], $date->year);
     }
 
     /**

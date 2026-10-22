@@ -1,4 +1,50 @@
-<div class="space-y-5">
+<div
+    class="space-y-5"
+    x-data="{
+        openActionMenuId: null,
+        actionMemberHasOpenPeriod: false,
+        actionMenuStyle: '',
+        actionTrigger: null,
+        toggleActionMenu(memberId, hasOpenPeriod, trigger) {
+            if (this.openActionMenuId === memberId) {
+                this.closeActionMenu();
+
+                return;
+            }
+
+            const rect = trigger.getBoundingClientRect();
+            const width = Math.min(208, window.innerWidth - 16);
+            const estimatedHeight = 186;
+            const left = Math.min(
+                Math.max(8, rect.right - width),
+                window.innerWidth - width - 8,
+            );
+            const top = rect.bottom + estimatedHeight + 8 <= window.innerHeight
+                ? rect.bottom + 6
+                : Math.max(8, rect.top - estimatedHeight - 6);
+
+            this.openActionMenuId = memberId;
+            this.actionMemberHasOpenPeriod = hasOpenPeriod;
+            this.actionTrigger = trigger;
+            this.actionMenuStyle = `left: ${left}px; top: ${top}px; width: ${width}px;`;
+            this.$nextTick(() => this.$refs.actionMenu?.querySelector('button')?.focus());
+        },
+        closeActionMenu(returnFocus = false) {
+            const trigger = this.actionTrigger;
+
+            this.openActionMenuId = null;
+            this.actionMemberHasOpenPeriod = false;
+            this.actionTrigger = null;
+
+            if (returnFocus) {
+                this.$nextTick(() => trigger?.focus());
+            }
+        },
+    }"
+    x-on:resize.window="closeActionMenu()"
+    x-on:scroll.window="closeActionMenu()"
+    x-on:keydown.escape.window="closeActionMenu(true)"
+>
 
     <section class="card card-body">
         <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -82,19 +128,18 @@
             @endif
         </div>
 
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto" x-on:scroll="closeActionMenu()">
             <table class="table w-full">
                 <thead>
                     <tr>
                         <th class="w-10 text-center"><span class="sr-only">Pilih</span></th>
                         <th class="w-10 text-center">No</th>
-                        <th class="w-1/3">Peserta</th>
-                        <th>Kelas</th>
-                        <th>Penempatan</th>
+                        <th class="min-w-56">Peserta</th>
+                        <th class="min-w-44 whitespace-nowrap">Kelas / Penempatan</th>
                         <th>Kategori</th>
-                        <th>Wali</th>
-                        <th>Status</th>
-                        <th class="text-right w-32">Aksi</th>
+                        <th class="min-w-40">Wali</th>
+                        <th class="min-w-44 whitespace-nowrap">Status Catering</th>
+                        <th class="w-16 text-right">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -108,29 +153,45 @@
                                 {{ $members->firstItem() + $loop->index }}
                             </td>
                             <td>
-                                <div class="font-medium text-slate-900">{{ $member->name }}</div>
-                                <div class="mt-0.5 text-xs text-slate-500">
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="font-medium text-slate-900">{{ $member->name }}</span>
+                                    @if (! $member->is_active)
+                                        <span class="badge-neutral whitespace-nowrap">Nonaktif Peserta</span>
+                                    @endif
+                                </div>
+                                <div class="mt-0.5 whitespace-nowrap text-xs text-slate-500">
                                     {{ $member->gender?->label() ?? '-' }}
                                     @if ($member->phone)
                                         &middot; {{ $member->phone }}
                                     @endif
                                 </div>
                             </td>
-                            <td class="text-slate-600">{{ $member->schoolClass?->name ?? '-' }}</td>
                             <td class="text-slate-600">
                                 @php($assignment = $member->employeeAssignment)
-                                @if ($assignment)
-                                    <span class="badge-info">{{ $assignment->assignment_type?->label() }}</span>
-                                    <div class="mt-0.5 text-xs {{ $assignment->has_missing_target ? 'text-amber-600' : 'text-slate-500' }}">
-                                        {{ $assignment->target_label }}
+                                @if ($member->schoolClass)
+                                    <div class="whitespace-nowrap">
+                                        @if ($assignment)
+                                            <span class="text-xs text-slate-400">Kelas peserta:</span>
+                                        @endif
+                                        {{ $member->schoolClass->name }}
                                     </div>
-                                @else
+                                @endif
+                                @if ($assignment)
+                                    <div class="flex items-center gap-1.5 whitespace-nowrap {{ $member->schoolClass ? 'mt-1' : '' }}">
+                                        <span class="badge-info whitespace-nowrap">{{ $assignment->assignment_type?->label() }}</span>
+                                        @if ($assignment->assignment_type?->value !== 'general')
+                                            <span class="text-xs {{ $assignment->has_missing_target ? 'text-amber-600' : 'text-slate-500' }}">
+                                                {{ $assignment->target_label }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                @elseif (! $member->schoolClass)
                                     <span class="text-slate-400">-</span>
                                 @endif
                             </td>
                             <td>
                                 @if ($member->cateringCategory)
-                                    <span class="badge-info">{{ $member->cateringCategory->name }}</span>
+                                    <span class="badge-info whitespace-nowrap">{{ $member->cateringCategory->name }}</span>
                                 @else
                                     <span class="text-slate-400">-</span>
                                 @endif
@@ -138,26 +199,45 @@
                             <td class="text-slate-600">
                                 <div>{{ $member->guardian_name ?? '-' }}</div>
                                 @if ($member->guardian_phone)
-                                    <div class="mt-0.5 text-xs text-slate-500">{{ $member->guardian_phone }}</div>
+                                    <div class="mt-0.5 whitespace-nowrap text-xs text-slate-500">{{ $member->guardian_phone }}</div>
                                 @endif
                             </td>
                             <td>
-                                @if ($member->is_active)
+                                @php($openPeriod = $member->periods->first(fn ($period) => $period->end_date === null))
+                                @php($lastEnd = $member->periods->whereNotNull('end_date')->max('end_date'))
+                                @if ($openPeriod)
                                     <span class="badge-success"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Aktif</span>
+                                    <div class="mt-1 whitespace-nowrap text-xs text-slate-500">
+                                        Sejak {{ $openPeriod->start_date->locale('id')->translatedFormat('d F Y') }}
+                                    </div>
                                 @else
-                                    <span class="badge-neutral"><span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span>Nonaktif</span>
+                                    <span class="badge-neutral"><span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span>Tidak Aktif</span>
+                                    @if ($lastEnd)
+                                        <div class="mt-1 whitespace-nowrap text-xs text-slate-500">
+                                            Terakhir {{ $lastEnd->locale('id')->translatedFormat('d F Y') }}
+                                        </div>
+                                    @else
+                                        <div class="mt-1 whitespace-nowrap text-xs text-slate-500">Belum pernah ikut</div>
+                                    @endif
                                 @endif
                             </td>
-                            <td>
-                                <div class="flex items-center justify-end gap-1">
-                                    <button type="button" wire:click="edit({{ $member->id }})" class="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50">Edit</button>
-                                    <button type="button" wire:click="confirmDelete({{ $member->id }})" class="btn-danger-soft">Hapus</button>
-                                </div>
+                            <td class="text-right">
+                                <button
+                                    type="button"
+                                    x-on:click.stop="toggleActionMenu({{ $member->id }}, @js($openPeriod !== null), $el)"
+                                    x-bind:aria-expanded="openActionMenuId === {{ $member->id }}"
+                                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl font-semibold leading-none text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                                    aria-label="Buka aksi untuk {{ $member->name }}"
+                                    aria-haspopup="menu"
+                                    aria-controls="member-action-menu"
+                                >
+                                    <span aria-hidden="true">&#8942;</span>
+                                </button>
                             </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="py-12 text-center">
+                            <td colspan="8" class="py-12 text-center">
                                 <div class="mx-auto flex max-w-sm flex-col items-center">
                                     <div class="icon-box">
                                         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.1a8.5 8.5 0 0 0-3-.52c-1.05 0-2.06.19-3 .52m6 0a6 6 0 0 1 3.3 2.1M15 19.1a4.5 4.5 0 1 0-6 0m0 0a6 6 0 0 0-3.3 2.1M15.75 6.75a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" /></svg>
@@ -173,6 +253,28 @@
         </div>
     </section>
 
+    <template x-teleport="body">
+        <div
+            x-cloak
+            x-show="openActionMenuId !== null"
+            x-ref="actionMenu"
+            x-bind:style="actionMenuStyle"
+            x-on:click.outside="closeActionMenu()"
+            id="member-action-menu"
+            class="fixed z-[60] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+            style="display: none;"
+            role="menu"
+            aria-label="Aksi peserta"
+        >
+            <button type="button" x-on:click="const memberId = openActionMenuId; closeActionMenu(); $wire.edit(memberId)" class="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-900" role="menuitem">Edit Peserta</button>
+            <button type="button" x-on:click="const memberId = openActionMenuId; closeActionMenu(); $wire.openHistoryModal(memberId)" class="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-900" role="menuitem">Riwayat Catering</button>
+            <button type="button" x-show="actionMemberHasOpenPeriod" x-on:click="const memberId = openActionMenuId; closeActionMenu(); $wire.openStopModal(memberId)" class="block w-full px-3 py-2 text-left text-sm font-semibold text-amber-700 transition hover:bg-amber-50 hover:text-amber-800" style="display: none;" role="menuitem">Berhenti Catering</button>
+            <button type="button" x-show="! actionMemberHasOpenPeriod" x-on:click="const memberId = openActionMenuId; closeActionMenu(); $wire.openRejoinModal(memberId)" class="block w-full px-3 py-2 text-left text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800" style="display: none;" role="menuitem">Mulai Catering Lagi</button>
+            <div class="my-1 border-t border-slate-100" role="separator"></div>
+            <button type="button" x-on:click="const memberId = openActionMenuId; closeActionMenu(); $wire.confirmDelete(memberId)" class="block w-full px-3 py-2 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700" role="menuitem">Hapus Peserta</button>
+        </div>
+    </template>
+
     @if ($members->hasPages())
         <div>{{ $members->links() }}</div>
     @endif
@@ -181,6 +283,13 @@
         <div class="alert-danger flex items-center gap-2" role="alert">
             <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9.75v4.5m0 3h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
             {{ $errors->first('delete') }}
+        </div>
+    @endif
+
+    @if ($errors->has('membership'))
+        <div class="alert-danger flex items-center gap-2" role="alert">
+            <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9.75v4.5m0 3h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+            {{ $errors->first('membership') }}
         </div>
     @endif
 
@@ -214,6 +323,15 @@
                             <input id="member-name" type="text" wire:model="name" class="input" placeholder="Nama lengkap peserta" />
                             @error('name')<p class="field-error">{{ $message }}</p>@enderror
                         </div>
+
+                        @if (! $editingId)
+                            <div>
+                                <label for="member-mulai-catering" class="label">Mulai Catering</label>
+                                <input id="member-mulai-catering" type="date" wire:model="mulai_catering" class="input" />
+                                <p class="mt-1 text-xs text-slate-500">Tanggal pertama peserta mulai mengikuti catering. Tanggal ini bisa diisi tanggal lampau, hari ini, atau mendatang.</p>
+                                @error('mulai_catering')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
+                        @endif
 
                         <div class="grid gap-4 sm:grid-cols-2">
                             <div>
@@ -346,7 +464,7 @@
 
                         <label class="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                             <input type="checkbox" wire:model="is_active" class="checkbox mt-0.5" />
-                            <span><span class="font-medium text-slate-800">Status aktif</span><span class="mt-0.5 block text-xs text-slate-500">Peserta aktif dapat diproses dalam layanan catering.</span></span>
+                            <span><span class="font-medium text-slate-800">Status peserta aktif</span><span class="mt-0.5 block text-xs text-slate-500">Menandai data peserta tidak diarsipkan. Keikutsertaan catering diatur terpisah melalui periode.</span></span>
                         </label>
                     </div>
 
@@ -383,7 +501,7 @@
                 <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
                     @if ($isBulkDelete)
                         <p class="text-sm text-slate-700">
-                            Anda akan menghapus <strong>{{ $deletingMemberCount }} peserta</strong> beserta data absensi dan penempatan pegawai terkait.
+                            Anda akan menghapus <strong>{{ $deletingMemberCount }} peserta</strong> beserta seluruh data terkait.
                         </p>
                     @else
                         <p class="text-sm text-slate-700">Anda akan menghapus peserta berikut beserta data terkait:</p>
@@ -391,8 +509,14 @@
                     @endif
 
                     <div class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                        Data absensi dan penempatan pegawai terkait akan ikut dihapus. Tindakan ini tidak dapat dibatalkan.
+                        Data periode keikutsertaan, absensi, penempatan pegawai, tagihan, pembayaran, kredit, dan alokasi kredit terkait akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
                     </div>
+
+                    @error('delete')
+                        <div class="mt-3 rounded-lg border border-red-300 bg-red-100 p-3 text-sm font-medium text-red-900" role="alert">
+                            {{ $message }}
+                        </div>
+                    @enderror
                 </div>
 
                 <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
@@ -401,6 +525,122 @@
                         wire:target="deleteConfirmed" class="btn-danger">
                         {{ $isBulkDelete ? 'Hapus '.$deletingMemberCount.' Peserta' : 'Ya, Hapus' }}
                     </button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- STOP CATERING MODAL --}}
+    @if ($showStopModal)
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeStopModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="stop-modal-title">
+            <div wire:click="closeStopModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
+
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <div>
+                        <h3 id="stop-modal-title" class="text-base font-semibold text-slate-900">Berhenti Catering</h3>
+                        <p class="mt-1 text-sm text-slate-500">{{ $stoppingName }}</p>
+                    </div>
+                    <button type="button" wire:click="closeStopModal" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+
+                <form wire:submit="stopCatering" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
+                        <p class="text-sm text-slate-600">Mulai: <span class="font-medium text-slate-900">{{ $stoppingStart }}</span></p>
+                        <div>
+                            <label for="member-tanggal-terakhir" class="label">Tanggal Terakhir Ikut Catering</label>
+                            <input id="member-tanggal-terakhir" type="date" wire:model="tanggal_terakhir" class="input" />
+                            <p class="mt-1 text-xs text-slate-500">Tanggal ini adalah hari terakhir peserta masih dihitung ikut catering. Hari setelahnya tidak lagi dihitung.</p>
+                            @error('tanggal_terakhir')<p class="field-error">{{ $message }}</p>@enderror
+                        </div>
+                        @error('membership')<p class="field-error">{{ $message }}</p>@enderror
+                    </div>
+
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                        <button type="button" wire:click="closeStopModal" class="btn-secondary">Batal</button>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="stopCatering" class="btn-primary">
+                            <span wire:loading.remove wire:target="stopCatering">Simpan</span>
+                            <span wire:loading wire:target="stopCatering">Menyimpan...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    {{-- REJOIN CATERING MODAL --}}
+    @if ($showRejoinModal)
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeRejoinModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="rejoin-modal-title">
+            <div wire:click="closeRejoinModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
+
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <div>
+                        <h3 id="rejoin-modal-title" class="text-base font-semibold text-slate-900">Mulai Catering Lagi</h3>
+                        <p class="mt-1 text-sm text-slate-500">{{ $rejoiningName }}</p>
+                    </div>
+                    <button type="button" wire:click="closeRejoinModal" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+
+                <form wire:submit="rejoinCatering" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
+                        <p class="text-sm text-slate-600">Peserta akan kembali dihitung ikut catering mulai tanggal yang dipilih.</p>
+                        <div>
+                            <label for="member-mulai-catering-lagi" class="label">Mulai Catering</label>
+                            <input id="member-mulai-catering-lagi" type="date" wire:model="mulai_catering_lagi" class="input" />
+                            @error('mulai_catering_lagi')<p class="field-error">{{ $message }}</p>@enderror
+                        </div>
+                        @error('membership')<p class="field-error">{{ $message }}</p>@enderror
+                    </div>
+
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                        <button type="button" wire:click="closeRejoinModal" class="btn-secondary">Batal</button>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="rejoinCatering" class="btn-primary">
+                            <span wire:loading.remove wire:target="rejoinCatering">Simpan</span>
+                            <span wire:loading wire:target="rejoinCatering">Menyimpan...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    {{-- MEMBERSHIP HISTORY MODAL --}}
+    @if ($showHistoryModal)
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeHistoryModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="history-modal-title">
+            <div wire:click="closeHistoryModal" class="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true"></div>
+
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <div>
+                        <h3 id="history-modal-title" class="text-base font-semibold text-slate-900">Periode Keikutsertaan</h3>
+                        <p class="mt-1 text-sm text-slate-500">{{ $historyName }}</p>
+                    </div>
+                    <button type="button" wire:click="closeHistoryModal" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
+                    @forelse ($historyPeriods as $period)
+                        <div class="flex items-center justify-between border-b border-slate-100 py-2.5 text-sm last:border-0">
+                            <span class="text-slate-700">{{ $period['start'] }}</span>
+                            <span class="text-slate-400">&ndash;</span>
+                            <span class="{{ $period['end'] === null ? 'font-semibold text-emerald-600' : 'text-slate-700' }}">
+                                {{ $period['end'] ?? 'Sekarang' }}
+                            </span>
+                        </div>
+                    @empty
+                        <p class="py-6 text-center text-sm text-slate-500">Peserta belum memiliki riwayat keikutsertaan.</p>
+                    @endforelse
+                </div>
+
+                <div class="flex shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                    <button type="button" wire:click="closeHistoryModal" class="btn-secondary">Tutup</button>
                 </div>
             </div>
         </div>

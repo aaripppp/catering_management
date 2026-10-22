@@ -7,6 +7,7 @@ use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringAttendanceRecapExportService;
@@ -22,6 +23,14 @@ use OpenSpout\Reader\XLSX\Reader;
 function storeRecapAttendance(CateringMember $member, array $statuses, int $year = 2026, int $month = 10): void
 {
     $start = CarbonImmutable::create($year, $month, 1);
+
+    if (! $member->periods()->exists()) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $member->id,
+            'start_date' => $start->toDateString(),
+            'end_date' => null,
+        ]);
+    }
 
     foreach ($statuses as $index => $status) {
         CateringAttendance::factory()->for($member)->create([
@@ -112,6 +121,42 @@ it('summarizes every stored attendance status in only the selected period', func
         'puasa' => 1,
         'libur' => 1,
     ]);
+});
+
+it('retains covered monthly history while ignoring stored attendance after membership ends', function () {
+    $member = CateringMember::factory()->create(['name' => 'Peserta Berhenti']);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-10-15',
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-14',
+        'status' => CateringAttendanceStatus::Sakit,
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-15',
+        'status' => CateringAttendanceStatus::Ikut,
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-16',
+        'status' => CateringAttendanceStatus::Izin,
+    ]);
+
+    $service = app(CateringAttendanceRecapService::class);
+    $summary = $service->summary(recapFilters());
+    $row = $service->participantRows(recapFilters())->sole();
+
+    expect(CateringAttendance::query()->where('catering_member_id', $member->id)->count())->toBe(3);
+    expect($summary['participants'])->toBe(1)
+        ->and($summary['total_records'])->toBe(2)
+        ->and($summary['ikut'])->toBe(1)
+        ->and($summary['sakit'])->toBe(1)
+        ->and($summary['izin'])->toBe(0);
+    expect($row['total_days'])->toBe(2)
+        ->and($row['ikut'])->toBe(1)
+        ->and($row['sakit'])->toBe(1)
+        ->and($row['izin'])->toBe(0);
 });
 
 it('combines group jenjang class and participant name filters', function () {

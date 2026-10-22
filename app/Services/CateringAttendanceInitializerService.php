@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CateringAttendanceStatus;
 use App\Models\CateringAttendance;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
@@ -26,14 +27,34 @@ class CateringAttendanceInitializerService
 
     private static function ensureRange(CarbonImmutable $startDate, CarbonImmutable $endDate): int
     {
+        $startStr = $startDate->toDateString();
+        $endStr = $endDate->toDateString();
+
         $memberIds = CateringMember::query()
             ->active()
+            ->whereHas('periods', function ($query) use ($startStr, $endStr): void {
+                $query->whereDate('start_date', '<=', $endStr)
+                    ->where(function ($q) use ($startStr): void {
+                        $q->whereNull('end_date')
+                            ->orWhereDate('end_date', '>=', $startStr);
+                    });
+            })
             ->pluck('id')
             ->all();
 
         if ($memberIds === []) {
             return 0;
         }
+
+        $periods = CateringMemberPeriod::query()
+            ->whereIn('catering_member_id', $memberIds)
+            ->whereDate('start_date', '<=', $endStr)
+            ->where(function ($q) use ($startStr): void {
+                $q->whereNull('end_date')
+                    ->orWhereDate('end_date', '>=', $startStr);
+            })
+            ->get()
+            ->groupBy('catering_member_id');
 
         $dates = [];
 
@@ -62,7 +83,26 @@ class CateringAttendanceInitializerService
         $createdCount = 0;
 
         foreach ($memberIds as $memberId) {
+            $memberPeriods = $periods->get($memberId) ?? collect();
             foreach ($dates as $date => $defaults) {
+                $isCovered = $memberPeriods->contains(function ($period) use ($date): bool {
+                    /** @var CateringMemberPeriod $period */
+                    $pStart = $period->start_date->toDateString();
+                    $pEnd = $period->end_date?->toDateString();
+                    if ($pStart > $date) {
+                        return false;
+                    }
+                    if ($pEnd === null) {
+                        return true;
+                    }
+
+                    return $pEnd >= $date;
+                });
+
+                if (! $isCovered) {
+                    continue;
+                }
+
                 if (isset($existingRows[$memberId.'|'.$date])) {
                     continue;
                 }

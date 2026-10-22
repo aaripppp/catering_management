@@ -6,6 +6,7 @@ use App\Livewire\CateringAttendance\Index as CateringAttendanceIndex;
 use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use Livewire\Features\SupportTesting\Testable;
@@ -17,6 +18,18 @@ function openDefaultStudentMatrix(
     int $year = 2026,
     int $month = 9,
 ): Testable {
+    CateringMember::query()
+        ->active()
+        ->whereDoesntHave('periods')
+        ->get()
+        ->each(function (CateringMember $member): void {
+            CateringMemberPeriod::create([
+                'catering_member_id' => $member->id,
+                'start_date' => '2026-09-01',
+                'end_date' => null,
+            ]);
+        });
+
     return Livewire::actingAs($user)
         ->test(CateringAttendanceIndex::class)
         ->call('changeFilter', 'year', $year)
@@ -140,6 +153,11 @@ it('switches back from employee to student and reloads the class', function () {
 it('keeps attendance auto saving and reloading working on the default student flow', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $student = CateringMember::factory()->create(['name' => 'Siswa Simpan', 'school_class_id' => $schoolClass->id]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $student->id,
+        'start_date' => '2026-09-01',
+        'end_date' => null,
+    ]);
 
     openDefaultStudentMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $student->id, '2026-09-01', 'ikut')

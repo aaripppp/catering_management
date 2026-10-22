@@ -25,6 +25,11 @@ class CateringBillPolicy
         return $user->isAdmin();
     }
 
+    public function resetPeriod(User $user): bool
+    {
+        return $user->isAdmin();
+    }
+
     public function recordPayment(User $user, CateringBill $cateringBill): bool
     {
         return $user->isAdmin();

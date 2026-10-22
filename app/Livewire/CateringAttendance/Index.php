@@ -7,9 +7,11 @@ use App\Enums\CateringParticipantGroup;
 use App\Enums\SchoolLevel;
 use App\Models\CateringAttendance;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Services\CateringAttendanceInitializerService;
 use App\Services\CateringInvoiceService;
+use App\Services\CateringMembershipService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -50,12 +52,20 @@ class Index extends Component
     #[Locked]
     public array $participants = [];
 
-    /** @var array<int, array{date: string, day: int, weekday: string, isWeekend: bool}> */
+    /** @var array<int, array{date: string, day: int, weekday: string, isWeekend: bool, hasEligibleParticipants?: bool}> */
     #[Locked]
     public array $dates = [];
 
-    /** @var array<int, array<string, string>> */
+    /** @var array<int, array<int, array{start: string, end: string|null}>> */
+    #[Locked]
+    public array $memberPeriods = [];
+
+    /** @var array<int, array<string, string|null>> */
     public array $attendance = [];
+
+    /** @var array<int, array<string, bool>> */
+    #[Locked]
+    public array $attendanceEligibility = [];
 
     /**
      * True while a cell or whole date write is in flight.
@@ -179,6 +189,10 @@ class Index extends Component
     {
         abort_unless(auth()->check(), 403);
 
+        $start = CarbonImmutable::create($this->year, $this->month, 1)->startOfMonth();
+        $end = $start->endOfMonth();
+        $dates = $this->generateDates($start);
+
         if ($this->selectedParticipantId !== null) {
             $this->validatePeriod();
             $selectedMember = $this->eligibleParticipantQuery()->find($this->selectedParticipantId);
@@ -197,12 +211,8 @@ class Index extends Component
             $this->validateSelection();
             $group = $this->selectedParticipantGroup();
             $schoolClass = $this->resolveSelectedClass();
-            $participantModels = $this->participantQuery($group, $schoolClass)->get();
+            $participantModels = $this->participantQuery($group, $schoolClass, $start, $end)->get();
         }
-
-        $start = CarbonImmutable::create($this->year, $this->month, 1)->startOfMonth();
-        $end = $start->endOfMonth();
-        $dates = $this->generateDates($start);
 
         CateringAttendanceInitializerService::ensureMonth($this->year, $this->month);
 
@@ -217,6 +227,7 @@ class Index extends Component
 
         $attendanceByMember = [];
         $participantIds = array_column($participants, 'id');
+        $periodsByMember = [];
 
         if ($participantIds !== []) {
             // One query for the whole month, never one per participant or cell.
@@ -230,20 +241,52 @@ class Index extends Component
             foreach ($savedAttendance as $saved) {
                 $attendanceByMember[$saved->catering_member_id][$saved->attendance_date->toDateString()] = $saved->status->value;
             }
+
+            $periodRows = CateringMemberPeriod::query()
+                ->whereIn('catering_member_id', $participantIds)
+                ->whereDate('start_date', '<=', $end->toDateString())
+                ->where(function ($query) use ($start): void {
+                    $query->whereNull('end_date')
+                        ->orWhereDate('end_date', '>=', $start->toDateString());
+                })
+                ->get(['catering_member_id', 'start_date', 'end_date']);
+
+            foreach ($periodRows as $periodRow) {
+                $periodsByMember[$periodRow->catering_member_id][] = [
+                    'start' => $periodRow->start_date->toDateString(),
+                    'end' => $periodRow->end_date?->toDateString(),
+                ];
+            }
         }
 
         $attendance = [];
+        $attendanceEligibility = [];
 
         foreach ($participants as $participant) {
             foreach ($dates as $date) {
-                $attendance[$participant['id']][$date['date']] = $attendanceByMember[$participant['id']][$date['date']]
-                    ?? $this->defaultStatus($date);
+                $isCovered = $this->periodsCoverDate(
+                    $periodsByMember[$participant['id']] ?? [],
+                    $date['date'],
+                );
+                $attendanceEligibility[$participant['id']][$date['date']] = $isCovered;
+                $attendance[$participant['id']][$date['date']] = $isCovered
+                    ? ($attendanceByMember[$participant['id']][$date['date']] ?? $this->defaultStatus($date))
+                    : null;
             }
         }
+
+        foreach ($dates as &$date) {
+            $date['hasEligibleParticipants'] = collect($participants)->contains(
+                fn (array $participant): bool => $attendanceEligibility[$participant['id']][$date['date']] ?? false,
+            );
+        }
+        unset($date);
 
         $this->participants = $participants;
         $this->dates = $dates;
         $this->attendance = $attendance;
+        $this->attendanceEligibility = $attendanceEligibility;
+        $this->memberPeriods = $periodsByMember;
         $this->loadedClassId = $schoolClass?->id;
         $this->loadedParticipantGroup = $group->value;
         $this->loadedMonth = $this->month;
@@ -253,9 +296,18 @@ class Index extends Component
         $this->resetValidation();
     }
 
-    public function openStatusMenu(int $memberId, string $date): void
-    {
+    public function openStatusMenu(
+        int $memberId,
+        string $date,
+        CateringMembershipService $membershipService,
+    ): void {
         $this->ensureCellBelongsToMatrix($memberId, $date);
+
+        if (! $membershipService->isCovered($memberId, CarbonImmutable::parse($date))) {
+            throw ValidationException::withMessages([
+                'attendance' => 'Tanggal tidak termasuk periode keikutsertaan peserta.',
+            ]);
+        }
 
         $this->editingMemberId = $memberId;
         $this->editingDate = $date;
@@ -273,11 +325,20 @@ class Index extends Component
      * Only the member and date that were touched are written, so an edit made by
      * another user on a different cell is never overwritten.
      */
-    public function setCellStatus(int $memberId, string $date, string $status): void
-    {
+    public function setCellStatus(
+        int $memberId,
+        string $date,
+        string $status,
+        CateringMembershipService $membershipService,
+    ): void {
         abort_unless(auth()->check(), 403);
 
         $this->ensureCellBelongsToMatrix($memberId, $date);
+        if (! $membershipService->isCovered($memberId, CarbonImmutable::parse($date))) {
+            throw ValidationException::withMessages([
+                'attendance' => 'Tanggal tidak termasuk periode keikutsertaan peserta.',
+            ]);
+        }
         $validated = Validator::make(
             ['status' => $status],
             ['status' => ['required', Rule::enum(CateringAttendanceStatus::class)]],
@@ -334,9 +395,13 @@ class Index extends Component
 
         $previous = [];
         $payload = [];
+        $coveredMemberIds = $this->freshCoveredMemberIds($date);
 
         foreach ($this->participants as $participant) {
             $memberId = $participant['id'];
+            if (! isset($coveredMemberIds[$memberId])) {
+                continue;
+            }
             $previous[$memberId] = $this->attendance[$memberId][$date] ?? null;
             $this->attendance[$memberId][$date] = $validated['status'];
             $payload[] = [
@@ -556,8 +621,12 @@ class Index extends Component
      *
      * @return Builder<CateringMember>
      */
-    private function participantQuery(CateringParticipantGroup $group, ?SchoolClass $schoolClass): Builder
-    {
+    private function participantQuery(
+        CateringParticipantGroup $group,
+        ?SchoolClass $schoolClass,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+    ): Builder {
         return CateringMember::query()
             ->select(['id', 'name', 'school_class_id'])
             ->participantGroup($group)
@@ -566,6 +635,7 @@ class Index extends Component
                 fn (Builder $query): Builder => $query->where('school_class_id', $schoolClass->id),
             )
             ->active()
+            ->participatingBetween($start, $end)
             ->orderBy('name')
             ->orderBy('id');
     }
@@ -748,6 +818,8 @@ class Index extends Component
         $this->participants = [];
         $this->dates = [];
         $this->attendance = [];
+        $this->attendanceEligibility = [];
+        $this->memberPeriods = [];
         $this->loadedClassId = null;
         $this->loadedParticipantGroup = null;
         $this->loadedMonth = null;
@@ -797,6 +869,45 @@ class Index extends Component
             type: 'warning',
             message: 'Peserta yang dipilih sudah tidak aktif atau tidak tersedia.',
         );
+    }
+
+    /**
+     * @param  array<int, array{start: string, end: string|null}>  $periods
+     */
+    private function periodsCoverDate(array $periods, string $date): bool
+    {
+        foreach ($periods as $period) {
+            if ($period['start'] > $date) {
+                continue;
+            }
+
+            if ($period['end'] === null || $period['end'] >= $date) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return array<int, true> */
+    private function freshCoveredMemberIds(string $date): array
+    {
+        $memberIds = array_column($this->participants, 'id');
+
+        if ($memberIds === []) {
+            return [];
+        }
+
+        return CateringMemberPeriod::query()
+            ->whereIn('catering_member_id', $memberIds)
+            ->whereDate('start_date', '<=', $date)
+            ->where(function (Builder $query) use ($date): void {
+                $query->whereNull('end_date')
+                    ->orWhereDate('end_date', '>=', $date);
+            })
+            ->pluck('catering_member_id')
+            ->mapWithKeys(fn (int $memberId): array => [$memberId => true])
+            ->all();
     }
 
     private function ensureCellBelongsToMatrix(int $memberId, string $date): void

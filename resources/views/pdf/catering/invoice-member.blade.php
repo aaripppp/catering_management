@@ -238,6 +238,41 @@
             white-space: nowrap;
         }
 
+        table.financial-summary {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 7px;
+            page-break-inside: avoid;
+        }
+
+        table.financial-summary th,
+        table.financial-summary td {
+            border: 0.5px solid #bfdbfe;
+            padding: 4px 6px;
+            text-align: right;
+        }
+
+        table.financial-summary th {
+            background: #eff6ff;
+            color: #475569;
+            font-size: 8px;
+            font-weight: normal;
+            text-transform: uppercase;
+        }
+
+        table.financial-summary td {
+            color: #0f172a;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        table.financial-summary .amount-due {
+            background: #1e40af;
+            border-color: #1e40af;
+            color: #ffffff;
+            font-size: 12px;
+        }
+
         table.payment-grid {
             width: 100%;
             border-collapse: collapse;
@@ -284,6 +319,24 @@
             font-size: 12px;
             font-weight: bold;
             letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+
+        .payment-due {
+            margin-top: 4px;
+        }
+
+        .payment-due-label {
+            color: #64748b;
+            font-size: 7.7px;
+        }
+
+        .payment-due-value {
+            color: #0f172a;
+            font-size: 9px;
+            font-weight: bold;
+            margin-top: 1px;
+            white-space: nowrap;
         }
 
         .payment-instruction,
@@ -443,7 +496,7 @@
         <th style="width: 6%;">{{ CateringAttendanceStatus::EventUnit->label() }}</th>
         <th style="width: 6%;">{{ CateringAttendanceStatus::Puasa->label() }}</th>
         <th style="width: 20%;">Harga / Porsi</th>
-        <th class="total-head" style="width: 32%;">Total Tagihan</th>
+        <th class="total-head" style="width: 32%;">Total Tagihan Bulan Ini</th>
     </tr>
     <tr>
         <td>{{ $countIkut }}</td>
@@ -456,6 +509,19 @@
         <td>{{ $countPuasa }}</td>
         <td class="price">{{ $pricePerDayFormatted }}</td>
         <td class="total-cell">{{ $quantity }} hari &middot; {{ $totalFormatted }}</td>
+    </tr>
+</table>
+
+<table class="financial-summary">
+    <tr>
+        <th style="width: 33.33%;">Tagihan Bulan Ini</th>
+        <th style="width: 33.33%;">Total Tunggakan</th>
+        <th style="width: 33.34%;">Total Harus Dibayar</th>
+    </tr>
+    <tr>
+        <td>{{ $totalFormatted }}</td>
+        <td>{{ $totalOutstandingFormatted }}</td>
+        <td class="amount-due">{{ $totalDueFormatted }}</td>
     </tr>
 </table>
 
@@ -472,6 +538,10 @@
             <div class="payment-title">KONFIRMASI PEMBAYARAN</div>
             <div class="payment-instruction">Silakan konfirmasi pembayaran melalui WhatsApp Admin Catering.</div>
             <div class="payment-row"><span class="payment-label">WhatsApp</span><span class="payment-prominent">{{ $payment['admin_whatsapp_display'] }}</span></div>
+            <div class="payment-due">
+                <div class="payment-due-label">Batas Pembayaran</div>
+                <div class="payment-due-value">{{ $dueDateFormatted }}</div>
+            </div>
             <div class="confirmation-format">Format Konfirmasi:</div>
             <div class="confirmation-reference">{{ $confirmationReference }}</div>
         </td>

@@ -22,6 +22,25 @@ class CateringMemberImportSpreadsheet
         'No HP Wali',
         'No HP',
         'Catatan',
+        'Tanggal Mulai',
+    ];
+
+    /**
+     * Header set shipped before the optional Tanggal Mulai column existed.
+     * Templates downloaded earlier stay importable and simply leave the start
+     * date blank, which then defaults to the import date.
+     *
+     * @var array<int, string>
+     */
+    public const LEGACY_HEADERS = [
+        'Nama',
+        'Kelas',
+        'Kategori',
+        'Jenis Kelamin',
+        'Nama Wali',
+        'No HP Wali',
+        'No HP',
+        'Catatan',
     ];
 
     /**
@@ -40,15 +59,18 @@ class CateringMemberImportSpreadsheet
 
                 $rows = [];
                 $rowNumber = 0;
+                $hasDateColumn = false;
 
                 foreach ($sheet->getRowIterator() as $row) {
                     $rowNumber++;
                     $values = array_map($this->stringValue(...), $row->toArray());
 
                     if ($rowNumber === 1) {
-                        if ($values !== self::HEADERS) {
+                        if ($values !== self::HEADERS && $values !== self::LEGACY_HEADERS) {
                             throw new RuntimeException('Header file tidak sesuai template Import Peserta Catering.');
                         }
+
+                        $hasDateColumn = $values === self::HEADERS;
 
                         continue;
                     }
@@ -69,6 +91,7 @@ class CateringMemberImportSpreadsheet
                         'guardian_phone' => $values[5],
                         'phone' => $values[6],
                         'notes' => $values[7],
+                        'tanggal_mulai' => $hasDateColumn ? $values[8] : '',
                     ];
                 }
 
@@ -135,7 +158,7 @@ class CateringMemberImportSpreadsheet
             $writer->addRow(Row::fromValues([]));
             $writer->addRow(Row::fromValues(['WAJIB', 'Nama']));
             $writer->addRow(Row::fromValues(['KONDISIONAL', 'Kelas wajib untuk kategori kelompok Siswa dan harus dikosongkan untuk kelompok Pegawai.']));
-            $writer->addRow(Row::fromValues(['OPSIONAL', 'Kategori', 'Jenis Kelamin', 'Nama Wali', 'No HP Wali', 'No HP', 'Catatan']));
+            $writer->addRow(Row::fromValues(['OPSIONAL', 'Kategori', 'Jenis Kelamin', 'Nama Wali', 'No HP Wali', 'No HP', 'Catatan', 'Tanggal Mulai']));
             $writer->addRow(Row::fromValues([]));
             $writer->addRow(Row::fromValues(['Jika Kategori kosong, otomatis menggunakan "Siswa Umum".']));
             $writer->addRow(Row::fromValues(['Kelas wajib untuk kategori kelompok Siswa dan boleh kosong untuk kategori kelompok Pegawai.']));
@@ -143,9 +166,10 @@ class CateringMemberImportSpreadsheet
             $writer->addRow(Row::fromValues(['Kategori harus cocok dengan master Kategori Harga pada sheet REFERENSI KATEGORI.']));
             $writer->addRow(Row::fromValues(['Jangan membuat kelas atau kategori melalui file import.']));
             $writer->addRow(Row::fromValues(['Gunakan L atau P untuk Jenis Kelamin.']));
+            $writer->addRow(Row::fromValues(['Tanggal Mulai diisi format YYYY-MM-DD (contoh 2026-10-20). Jika dikosongkan, peserta dihitung ikut catering sejak tanggal import.']));
             $writer->addRow(Row::fromValues([]));
-            $writer->addRow(Row::fromValues(['CONTOH SISWA', 'Ahmad Fauzan', '7A', 'Siswa Umum']));
-            $writer->addRow(Row::fromValues(['CONTOH PEGAWAI', 'Ustadz Hasan', '[kosong]', 'Guru']));
+            $writer->addRow(Row::fromValues(['CONTOH SISWA', 'Ahmad Fauzan', '7A', 'Siswa Umum', '', '', '', '', '2026-10-20']));
+            $writer->addRow(Row::fromValues(['CONTOH PEGAWAI', 'Ustadz Hasan', '[kosong]', 'Guru', '', '', '', '', '']));
         } finally {
             $writer->close();
         }

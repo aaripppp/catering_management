@@ -7,6 +7,8 @@ use App\Models\CateringAttendance;
 use App\Models\CateringBill;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
+use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringAttendanceInitializerService;
@@ -35,6 +37,42 @@ function invoicePeriod(): array
 function invoiceService(): CateringInvoiceService
 {
     return app(CateringInvoiceService::class);
+}
+
+/**
+ * @param  array<string, mixed>  $attributes
+ */
+function createInvoiceBill(
+    CateringMember $member,
+    int $year,
+    int $month,
+    int $grossAmount,
+    array $attributes = [],
+): CateringBill {
+    return CateringBill::factory()->create(array_merge([
+        'catering_member_id' => $member->id,
+        'school_class_id' => $member->school_class_id,
+        'catering_category_id' => $member->catering_category_id,
+        'period_year' => $year,
+        'period_month' => $month,
+        'gross_amount' => $grossAmount,
+    ], $attributes));
+}
+
+/**
+ * Give a member an open membership period starting before the invoice period, so
+ * attendance generation and bill generation treat them as eligible on every date
+ * these tests exercise.
+ */
+function coverInvoiceMember(CateringMember $member, string $start = '2026-09-01'): CateringMember
+{
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => $start,
+        'end_date' => null,
+    ]);
+
+    return $member;
 }
 
 /**
@@ -144,6 +182,10 @@ function saveSeptemberAttendance(
     int $puasa = 0,
     int $libur = 0,
 ): void {
+    if (! $member->periods()->exists()) {
+        coverInvoiceMember($member);
+    }
+
     $statuses = array_merge(
         array_fill(0, $ikut, CateringAttendanceStatus::Ikut),
         array_fill(0, $sakit, CateringAttendanceStatus::Sakit),
@@ -297,6 +339,10 @@ function saveMonthAttendance(
     $start = CarbonImmutable::create($year, $month, 1)->startOfMonth();
     $statuses = [];
 
+    if (! $member->periods()->exists()) {
+        coverInvoiceMember($member, $start->toDateString());
+    }
+
     foreach ($plan as [$status, $count]) {
         for ($index = 0; $index < $count; $index++) {
             $statuses[] = $status;
@@ -411,6 +457,7 @@ it('links the individual invoice to a new tab preview endpoint', function () {
 it('keeps the individual preview link available right after an auto-saved change', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    coverInvoiceMember($member);
     saveSeptemberAttendance($member, ikut: 5);
 
     $component = openInvoiceAttendanceMatrix($schoolClass)
@@ -426,6 +473,7 @@ it('includes an auto-saved change in the bulk invoice download', function () {
     $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
 
     foreach ($members as $member) {
+        coverInvoiceMember($member);
         saveSeptemberAttendance($member, ikut: 5);
     }
 
@@ -616,6 +664,10 @@ it('does not introduce an n+1 pattern when building bulk invoices', function () 
 
     foreach ($members as $member) {
         saveSeptemberAttendance($member, ikut: 3);
+
+        foreach (range(3, 8) as $month) {
+            createInvoiceBill($member, 2026, $month, 100000);
+        }
     }
 
     [$start, $end] = invoicePeriod();
@@ -634,6 +686,7 @@ it('does not introduce an n+1 pattern when building bulk invoices', function () 
     DB::disableQueryLog();
 
     expect($invoices)->toHaveCount(12)
+        ->and($invoices[0]['totalOutstanding'])->toBe(600000)
         ->and($queryCount)->toBeLessThanOrEqual(5);
 });
 
@@ -791,7 +844,11 @@ it('requires authentication to preview an invoice', function () {
 
 it('rejects an invalid invoicing period', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
     saveSeptemberAttendance($member, ikut: 12);
 
     $this->actingAs(User::factory()->admin()->create())
@@ -839,6 +896,53 @@ it('ignores attendance rows outside the invoiced month', function () {
         ->and($invoice['total'])->toBe(60000);
 });
 
+it('ignores stored attendance after an inclusive membership end date across individual and bulk invoices', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 15000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-09-01',
+        'end_date' => '2026-09-15',
+    ]);
+
+    foreach (['2026-09-14', '2026-09-15', '2026-09-16'] as $date) {
+        CateringAttendance::factory()->for($member)->create([
+            'attendance_date' => $date,
+            'status' => CateringAttendanceStatus::Ikut,
+        ]);
+    }
+
+    $individual = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        ...invoicePeriod(),
+    );
+    $bulk = invoiceService()->buildBulkInvoices(
+        CateringParticipantGroup::Student,
+        $schoolClass,
+        ...invoicePeriod(),
+    );
+
+    expect(CateringAttendance::query()->where('catering_member_id', $member->id)->count())->toBe(3);
+    expect($individual['quantity'])->toBe(2)
+        ->and($individual['savedDays'])->toBe(2)
+        ->and($individual['total'])->toBe(30000)
+        ->and(array_column($individual['attendanceRows'], 'date'))->toBe([
+            '14/09/2026',
+            '15/09/2026',
+        ]);
+    expect($bulk)->toHaveCount(1)
+        ->and($bulk[0]['quantity'])->toBe(2)
+        ->and($bulk[0]['savedDays'])->toBe(2)
+        ->and(array_column($bulk[0]['attendanceRows'], 'date'))->toBe([
+            '14/09/2026',
+            '15/09/2026',
+        ]);
+});
+
 it('uses the current category price when the monthly bill has not been generated', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 14000]);
@@ -871,6 +975,8 @@ it('uses generated bill snapshots for invoice financial values', function () {
         'catering_category_id' => $category->id,
     ]);
     saveSeptemberAttendance($member, ikut: 10, sakit: 2);
+
+    coverInvoiceMember($member);
 
     app(CateringBillingService::class)->generate(
         year: 2026,
@@ -909,6 +1015,7 @@ it('reflects the latest resynced bill and payment balance in the invoice', funct
         'catering_category_id' => $category->id,
     ]);
     saveSeptemberAttendance($member, ikut: 10);
+    coverInvoiceMember($member);
     $admin = User::factory()->admin()->create();
     $billing = app(CateringBillingService::class);
     $billing->generate(2026, 9, CateringParticipantGroup::Student, $schoolClass, actor: $admin);
@@ -928,6 +1035,141 @@ it('reflects the latest resynced bill and payment balance in the invoice', funct
         ->and($invoice['paidAmount'])->toBe(140000)
         ->and($invoice['remainingAmount'])->toBe(14000)
         ->and($invoice['paymentStatusLabel'])->toBe('Sebagian');
+});
+
+it('adds all prior outstanding balances without subtracting current payments', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['price_per_day' => 16000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    [$start, $end] = saveMonthAttendance($member, 2026, 10, 22, [
+        [CateringAttendanceStatus::Ikut, 22],
+    ]);
+    $augustBill = createInvoiceBill($member, 2026, 8, 352000);
+    $septemberBill = createInvoiceBill($member, 2026, 9, 352000);
+    $currentBill = createInvoiceBill($member, 2026, 10, 352000, [
+        'price_per_day' => 16000,
+        'saved_days' => 22,
+        'active_days' => 22,
+    ]);
+    CateringPayment::factory()->create([
+        'catering_bill_id' => $augustBill->id,
+        'catering_member_id' => $member->id,
+        'amount' => 200000,
+    ]);
+    CateringPayment::factory()->create([
+        'catering_bill_id' => $septemberBill->id,
+        'catering_member_id' => $member->id,
+        'amount' => 50000,
+    ]);
+    CateringPayment::factory()->create([
+        'catering_bill_id' => $currentBill->id,
+        'catering_member_id' => $member->id,
+        'amount' => 100000,
+    ]);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        $start,
+        $end,
+    );
+    $text = invoicePdfText(invoiceService()->renderPdf($invoice));
+
+    expect($invoice['invoiceDate'])->toBe('01/11/2026')
+        ->and($invoice['dueDate'])->toBe('28/11/2026')
+        ->and($invoice['total'])->toBe(352000)
+        ->and($invoice['paidAmount'])->toBe(100000)
+        ->and($invoice['remainingAmount'])->toBe(252000)
+        ->and($invoice['totalOutstanding'])->toBe(454000)
+        ->and($invoice['totalDue'])->toBe(806000)
+        ->and($text)->toContain('TOTAL TUNGGAKAN')
+        ->and($text)->not->toContain('TUNGGAKAN SEPTEMBER 2026')
+        ->and($text)->not->toContain('BULAN LALU')
+        ->and($text)->toContain('TOTAL HARUS DIBAYAR')
+        ->and($text)->toContain('Rp 454.000')
+        ->and($text)->toContain('Rp 806.000');
+});
+
+it('shows zero cumulative outstanding when no prior bills exist', function () {
+    $schoolClass = SchoolClass::factory()->create();
+    $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 2);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        ...invoicePeriod(),
+    );
+
+    expect($invoice['totalOutstanding'])->toBe(0)
+        ->and($invoice['totalDue'])->toBe(30000);
+});
+
+it('uses reconciled credit once when summing historical outstanding', function () {
+    $schoolClass = SchoolClass::factory()->create();
+    $category = CateringCategory::factory()->create(['price_per_day' => 16000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    [$start, $end] = saveMonthAttendance($member, 2026, 10, 2, [
+        [CateringAttendanceStatus::Ikut, 2],
+    ]);
+    $julyBill = createInvoiceBill($member, 2026, 7, 100000);
+    $augustBill = createInvoiceBill($member, 2026, 8, 352000);
+    $septemberBill = createInvoiceBill($member, 2026, 9, 352000);
+    $payments = app(CateringPaymentService::class);
+    $payments->record($julyBill, 100000);
+    $payments->record($augustBill, 452000);
+    $payments->record($septemberBill, 50000);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        $start,
+        $end,
+    );
+
+    expect($julyBill->fresh()->remainingAmount())->toBe(0)
+        ->and($augustBill->fresh()->remainingAmount())->toBe(0)
+        ->and($septemberBill->fresh()->creditAppliedAmount())->toBe(100000)
+        ->and($septemberBill->fresh()->remainingAmount())->toBe(202000)
+        ->and($invoice['total'])->toBe(32000)
+        ->and($invoice['totalOutstanding'])->toBe(202000)
+        ->and($invoice['totalDue'])->toBe(234000);
+});
+
+it('includes December outstanding in a January invoice', function () {
+    $schoolClass = SchoolClass::factory()->create();
+    $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    [$start, $end] = saveMonthAttendance($member, 2027, 1, 2, [
+        [CateringAttendanceStatus::Ikut, 2],
+    ]);
+    $decemberBill = createInvoiceBill($member, 2026, 12, 100000);
+    CateringPayment::factory()->create([
+        'catering_bill_id' => $decemberBill->id,
+        'catering_member_id' => $member->id,
+        'amount' => 25000,
+    ]);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        $start,
+        $end,
+    );
+
+    expect($invoice['total'])->toBe(30000)
+        ->and($invoice['totalOutstanding'])->toBe(75000)
+        ->and($invoice['totalDue'])->toBe(105000);
 });
 
 it('lists every non-libur attendance date in the individual invoice detail table', function () {
@@ -1048,10 +1290,12 @@ it('renders official payment and dynamic confirmation details on an individual i
         ...invoicePeriod(),
     );
     $text = invoicePdfText(invoiceService()->renderPdf($invoice));
+    $html = view('pdf.catering.invoice-member', $invoice)->render();
 
     expect($invoice['total'])->toBe(34000)
         ->and($invoice['quantity'])->toBe(2)
-        ->and($invoice['confirmationReference'])->toBe('AHMAD ZAKI - 7A - SUDAH TRANSFER')
+        ->and($invoice['dueDateFormatted'])->toBe('28 Oktober 2026')
+        ->and($invoice['confirmationReference'])->toBe('AHMAD ZAKI - 7A - SEPTEMBER 2026 - SUDAH TRANSFER')
         ->not->toContain('INV/')
         ->and($text)->toContain('PEMBAYARAN')
         ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
@@ -1059,14 +1303,54 @@ it('renders official payment and dynamic confirmation details on an individual i
         ->and($text)->toContain('5222129702')
         ->and($text)->toContain('Rara Nurfatimah')
         ->and($text)->toContain('0813-9994-7699')
-        ->and($text)->toContain('AHMAD ZAKI - 7A - SUDAH TRANSFER')
+        ->and($text)->toContain('Batas Pembayaran')
+        ->and($text)->toContain('28 Oktober 2026')
+        ->and($text)->not->toContain('Jatuh Tempo')
+        ->and($text)->not->toContain('28/10/2026')
+        ->and($text)->toContain('AHMAD ZAKI - 7A - SEPTEMBER 2026 - SUDAH TRANSFER')
         ->and($text)->toContain('INV/CAF/09/2026/'.$member->id)
         ->and($text)->toContain('Ujian')
         ->and($text)->toContain('Event Unit')
         ->and($text)->toContain('Puasa')
         ->and($text)->not->toContain('KETERANGAN')
-        ->and($text)->not->toContain('08/09/2026 Libur');
+        ->and($text)->not->toContain('08/09/2026 Libur')
+        ->and(substr_count($html, 'Batas Pembayaran'))->toBe(1)
+        ->and($html)->not->toContain('Jatuh Tempo')
+        ->and(strpos($html, 'KONFIRMASI PEMBAYARAN') < strpos($html, 'Batas Pembayaran'))
+        ->toBeTrue()
+        ->and(strpos($html, 'Batas Pembayaran') < strpos($html, 'Format Konfirmasi:'))
+        ->toBeTrue();
 });
+
+it('keeps invoice and due dates deterministic across month and year boundaries', function (
+    int $year,
+    int $month,
+    string $invoiceDate,
+    string $dueDate,
+    string $dueDateFormatted,
+) {
+    $schoolClass = SchoolClass::factory()->create();
+    $category = CateringCategory::factory()->create();
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $start = CarbonImmutable::create($year, $month, 1)->startOfMonth();
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        $start,
+        $start->endOfMonth(),
+    );
+
+    expect($invoice['invoiceDate'])->toBe($invoiceDate)
+        ->and($invoice['dueDate'])->toBe($dueDate)
+        ->and($invoice['dueDateFormatted'])->toBe($dueDateFormatted);
+})->with([
+    'September 2026' => [2026, 9, '01/10/2026', '28/10/2026', '28 Oktober 2026'],
+    'October 2026' => [2026, 10, '01/11/2026', '28/11/2026', '28 November 2026'],
+    'December 2026' => [2026, 12, '01/01/2027', '28/01/2027', '28 Januari 2027'],
+]);
 
 it('shows guardian, invoice number and period identity in the individual invoice', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
@@ -1115,7 +1399,11 @@ it('omits guardian rows with a dash when guardian data is missing', function () 
 
 it('returns an inline class summary pdf for the selected class', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
     saveSeptemberAttendance($member, ikut: 6, sakit: 1);
 
     $response = $this->actingAs(User::factory()->admin()->create())
@@ -1131,8 +1419,17 @@ it('returns an inline class summary pdf for the selected class', function () {
 it('includes only the selected class participants in the class summary pdf', function () {
     $selectedClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $otherClass = SchoolClass::factory()->create(['name' => '7B', 'level' => '7']);
-    $inside = CateringMember::factory()->create(['name' => 'Ahmad Zaki', 'school_class_id' => $selectedClass->id]);
-    $outside = CateringMember::factory()->create(['name' => 'Budi Luar Kelas', 'school_class_id' => $otherClass->id]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
+    $inside = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $selectedClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $outside = CateringMember::factory()->create([
+        'name' => 'Budi Luar Kelas',
+        'school_class_id' => $otherClass->id,
+        'catering_category_id' => $category->id,
+    ]);
     saveSeptemberAttendance($inside, ikut: 4);
     saveSeptemberAttendance($outside, ikut: 9);
 
@@ -1151,18 +1448,47 @@ it('includes only the selected class participants in the class summary pdf', fun
         ->and($text)->toContain('INV/CAF/09/2026/CLASS-'.$selectedClass->id);
 });
 
+it('includes only current Siswa Umum members in a class summary', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $generalCategory = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
+    $otherCategory = CateringCategory::factory()->create(['name' => 'Siswa Khusus', 'price_per_day' => 20000]);
+    $included = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $generalCategory->id,
+    ]);
+    $excluded = CateringMember::factory()->create([
+        'name' => 'Budi Kategori Lain',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $otherCategory->id,
+    ]);
+    saveSeptemberAttendance($included, ikut: 4);
+    saveSeptemberAttendance($excluded, ikut: 5);
+
+    $invoice = invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
+
+    expect(array_column($invoice['rows'], 'memberName'))->toBe(['Ahmad Zaki'])
+        ->and($invoice['participants'])->toBe(1)
+        ->and($invoice['grandTotal'])->toBe(60000);
+});
+
 it('renders official payment and class confirmation details on the class invoice', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
     $member = CateringMember::factory()->create([
         'name' => 'Ahmad Zaki',
         'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
     ]);
     saveSeptemberAttendance($member, ikut: 3);
 
     $invoice = invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
     $text = invoicePdfText(invoiceService()->renderClassPdf($invoice));
+    $html = view('pdf.catering.invoice-class', $invoice)->render();
 
-    expect($invoice['confirmationReference'])->toBe('7A - SEPTEMBER 2026 - SUDAH TRANSFER')
+    expect($invoice['confirmationFormat'])->toBe('NAMA SISWA - KELAS - BULAN TAHUN - SUDAH TRANSFER')
+        ->and($invoice['dueDateFormatted'])->toBe('28 Oktober 2026')
+        ->and($invoice['confirmationReference'])->toBe('AHMAD ZAKI - 7A - SEPTEMBER 2026 - SUDAH TRANSFER')
         ->not->toContain('INV/');
 
     expect($text)->toContain('PEMBAYARAN')
@@ -1171,14 +1497,29 @@ it('renders official payment and class confirmation details on the class invoice
         ->and($text)->toContain('5222129702')
         ->and($text)->toContain('Rara Nurfatimah')
         ->and($text)->toContain('0813-9994-7699')
-        ->and($text)->toContain('7A - SEPTEMBER 2026 - SUDAH TRANSFER')
+        ->and($text)->toContain('Batas Pembayaran')
+        ->and($text)->toContain('28 Oktober 2026')
+        ->and($text)->not->toContain('Jatuh Tempo')
+        ->and($text)->not->toContain('28/10/2026')
+        ->and($text)->toContain('NAMA SISWA - KELAS - BULAN TAHUN - SUDAH TRANSFER')
+        ->and($text)->toContain('AHMAD ZAKI - 7A - SEPTEMBER 2026 - SUDAH TRANSFER')
         ->and($text)->toContain('INV/CAF/09/2026/CLASS-'.$schoolClass->id)
-        ->and($text)->not->toContain('AHMAD ZAKI - 7A - SUDAH TRANSFER');
+        ->and($text)->toContain('Contoh:')
+        ->and(substr_count($html, 'Batas Pembayaran'))->toBe(1)
+        ->and($html)->not->toContain('Jatuh Tempo')
+        ->and(strpos($html, 'KONFIRMASI PEMBAYARAN') < strpos($html, 'Batas Pembayaran'))
+        ->toBeTrue()
+        ->and(strpos($html, 'Batas Pembayaran') < strpos($html, 'Format Konfirmasi:'))
+        ->toBeTrue();
 });
 
 it('reports per status counts and the participant total in the class summary', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
+    $member = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
     saveSeptemberAttendance($member, ikut: 5, sakit: 2, izin: 1, alfa: 2, tidakIkut: 2, ujian: 2, eventUnit: 1, puasa: 1, libur: 4);
 
     [$start, $end] = invoicePeriod();
@@ -1221,22 +1562,43 @@ it('reports per status counts and the participant total in the class summary', f
         ->and($text)->not->toContain('Nasi Ayam');
 });
 
-it('uses each participant own category price in the class summary total', function () {
+it('uses each participant generated bill snapshot in the class summary total', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $expensive = CateringCategory::factory()->create(['price_per_day' => 20000]);
-    $cheap = CateringCategory::factory()->create(['price_per_day' => 10000]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
     $first = CateringMember::factory()->create([
         'name' => 'Ahmad Zaki',
         'school_class_id' => $schoolClass->id,
-        'catering_category_id' => $expensive->id,
+        'catering_category_id' => $category->id,
     ]);
     $second = CateringMember::factory()->create([
         'name' => 'Aisyah Putri',
         'school_class_id' => $schoolClass->id,
-        'catering_category_id' => $cheap->id,
+        'catering_category_id' => $category->id,
     ]);
     saveSeptemberAttendance($first, ikut: 3);
     saveSeptemberAttendance($second, ikut: 4);
+    CateringBill::factory()->create([
+        'catering_member_id' => $first->id,
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+        'period_month' => 9,
+        'period_year' => 2026,
+        'price_per_day' => 20000,
+        'saved_days' => 3,
+        'active_days' => 3,
+        'gross_amount' => 60000,
+    ]);
+    CateringBill::factory()->create([
+        'catering_member_id' => $second->id,
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+        'period_month' => 9,
+        'period_year' => 2026,
+        'price_per_day' => 10000,
+        'saved_days' => 4,
+        'active_days' => 4,
+        'gross_amount' => 40000,
+    ]);
 
     [$start, $end] = invoicePeriod();
     $invoice = invoiceService()->buildClassInvoice($schoolClass, $start, $end);
@@ -1252,15 +1614,14 @@ it('uses each participant own category price in the class summary total', functi
 
 it('does not average participant prices in the class summary grand total', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $expensive = CateringCategory::factory()->create(['price_per_day' => 30000]);
-    $cheap = CateringCategory::factory()->create(['price_per_day' => 10000]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 20000]);
     $first = CateringMember::factory()->create([
         'school_class_id' => $schoolClass->id,
-        'catering_category_id' => $expensive->id,
+        'catering_category_id' => $category->id,
     ]);
     $second = CateringMember::factory()->create([
         'school_class_id' => $schoolClass->id,
-        'catering_category_id' => $cheap->id,
+        'catering_category_id' => $category->id,
     ]);
     saveSeptemberAttendance($first, ikut: 2);
     saveSeptemberAttendance($second, ikut: 2);
@@ -1270,6 +1631,72 @@ it('does not average participant prices in the class summary grand total', funct
 
     expect($invoice['grandTotal'])->toBe(80000)
         ->and($invoice['totalIkut'])->toBe(4);
+});
+
+it('adds cumulative participant debt to class rows and aggregates', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $oldClass = SchoolClass::factory()->create(['name' => '6B', 'level' => '6']);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
+    $oldCategory = CateringCategory::factory()->create(['name' => 'Anak Guru', 'price_per_day' => 10000]);
+    $excludedCategory = CateringCategory::factory()->create(['name' => 'Siswa Khusus', 'price_per_day' => 20000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $excluded = CateringMember::factory()->create([
+        'name' => 'Budi Kategori Lain',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $excludedCategory->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 4);
+    saveSeptemberAttendance($excluded, ikut: 5);
+    $fullyPaidBill = createInvoiceBill($member, 2026, 5, 100000);
+    $overpaidBill = createInvoiceBill($member, 2026, 6, 100000);
+    $julyBill = createInvoiceBill($member, 2026, 7, 100000, [
+        'school_class_id' => $oldClass->id,
+        'school_class_name' => $oldClass->name,
+        'catering_category_id' => $oldCategory->id,
+        'category_name' => $oldCategory->name,
+    ]);
+    $augustBill = createInvoiceBill($member, 2026, 8, 200000, [
+        'school_class_id' => $oldClass->id,
+        'school_class_name' => $oldClass->name,
+        'catering_category_id' => $oldCategory->id,
+        'category_name' => $oldCategory->name,
+    ]);
+    createInvoiceBill($excluded, 2026, 8, 500000);
+
+    foreach ([
+        [$fullyPaidBill, 100000],
+        [$overpaidBill, 150000],
+        [$julyBill, 25000],
+        [$augustBill, 50000],
+    ] as [$bill, $amount]) {
+        CateringPayment::factory()->create([
+            'catering_bill_id' => $bill->id,
+            'catering_member_id' => $member->id,
+            'amount' => $amount,
+        ]);
+    }
+
+    $invoice = invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
+    $text = invoicePdfText(invoiceService()->renderClassPdf($invoice));
+
+    expect($invoice['invoiceDate'])->toBe('01/10/2026')
+        ->and($invoice['dueDate'])->toBe('28/10/2026')
+        ->and($invoice['grandTotal'])->toBe(60000)
+        ->and($invoice['totalOutstandingTotal'])->toBe(225000)
+        ->and($invoice['totalDue'])->toBe(285000)
+        ->and($invoice['rows'][0]['totalOutstanding'])->toBe(225000)
+        ->and($invoice['rows'][0]['totalDue'])->toBe(285000)
+        ->and(array_column($invoice['rows'], 'memberName'))->toBe(['Ahmad Zaki'])
+        ->and($text)->toContain('TOTAL TUNGGAKAN')
+        ->and($text)->not->toContain('BULAN LALU')
+        ->and($text)->toContain('HARUS DIBAYAR')
+        ->and($text)->toContain('Rp 225.000')
+        ->and($text)->toContain('Rp 285.000')
+        ->and($text)->not->toContain('Budi Kategori Lain');
 });
 
 it('refuses a class summary when the class has no saved attendance', function () {
@@ -1304,6 +1731,7 @@ it('links the class summary invoice to a new tab preview endpoint', function () 
 it('keeps the class summary link available right after an auto-saved change', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    coverInvoiceMember($member);
     saveSeptemberAttendance($member, ikut: 4);
 
     $component = openInvoiceAttendanceMatrix($schoolClass)
@@ -1327,7 +1755,7 @@ it('hides the class summary action for the employee participant group', function
 
 it('does not introduce an n+1 pattern when building a class summary invoice', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
     $members = CateringMember::factory()->count(6)->create([
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
@@ -1335,19 +1763,28 @@ it('does not introduce an n+1 pattern when building a class summary invoice', fu
 
     foreach ($members as $member) {
         saveSeptemberAttendance($member, ikut: 4);
+
+        foreach (range(3, 8) as $month) {
+            createInvoiceBill($member, 2026, $month, 100000);
+        }
     }
 
     DB::enableQueryLog();
-    invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
+    $invoice = invoiceService()->buildClassInvoice($schoolClass, ...invoicePeriod());
     $queries = count(DB::getQueryLog());
     DB::disableQueryLog();
 
-    expect($queries)->toBeLessThanOrEqual(4);
+    expect($invoice['totalOutstandingTotal'])->toBe(3600000)
+        ->and($queries)->toBeLessThanOrEqual(4);
 });
 
 it('does not modify saved attendance while generating a class summary invoice', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum']);
+    $members = CateringMember::factory()->count(2)->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
 
     foreach ($members as $member) {
         saveSeptemberAttendance($member, ikut: 5, sakit: 1);
@@ -1723,6 +2160,7 @@ function octoberInvoiceFixture(int $pricePerDay = 17000): array
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    coverInvoiceMember($member, '2026-10-01');
 
     foreach (octoberInvoiceVisibilityAttendance() as $date => $status) {
         CateringAttendance::factory()->for($member)->create([
@@ -1846,6 +2284,7 @@ it('prints only the working days of a fully initialised october', function () {
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    coverInvoiceMember($member);
 
     CateringAttendanceInitializerService::ensureMonth(2026, 10);
 
@@ -1982,6 +2421,10 @@ it('keeps every pdf inside the class zip free of libur rows', function () {
         'catering_category_id' => $category->id,
     ]);
 
+    foreach ($members as $member) {
+        coverInvoiceMember($member);
+    }
+
     // Opening the attendance matrix is what stores the month: weekdays "ikut", weekends "libur".
     $component = openInvoiceAttendanceMatrix($schoolClass)
         ->call('changeFilter', 'month', 10);
@@ -2030,12 +2473,13 @@ it('keeps every pdf inside the class zip free of libur rows', function () {
 
 it('prints the same rows and the same total in the class zip as in a direct pdf', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
-    $category = CateringCategory::factory()->create(['name' => 'Siswa Umum', 'price_per_day' => 15000]);
+    $category = CateringCategory::factory()->create(['name' => 'Siswa Khusus', 'price_per_day' => 15000]);
     $member = CateringMember::factory()->create([
         'name' => 'Ahmad Zaki',
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    coverInvoiceMember($member);
 
     CateringAttendanceInitializerService::ensureMonth(2026, 10);
     CateringAttendance::query()
@@ -2046,6 +2490,16 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->where('catering_member_id', $member->id)
         ->whereDate('attendance_date', '2026-10-06')
         ->update(['status' => CateringAttendanceStatus::Alfa->value]);
+    $augustBill = createInvoiceBill($member, 2026, 8, 100000);
+    $septemberBill = createInvoiceBill($member, 2026, 9, 200000);
+
+    foreach ([[$augustBill, 25000], [$septemberBill, 50000]] as [$bill, $amount]) {
+        CateringPayment::factory()->create([
+            'catering_bill_id' => $bill->id,
+            'catering_member_id' => $member->id,
+            'amount' => $amount,
+        ]);
+    }
 
     $invoice = invoiceService()->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), ...octoberPeriod());
 
@@ -2076,6 +2530,18 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->and($fromZip)->toContain('Budaya Makan')
         ->and($fromZip)->not->toContain('Alfa')
         ->and($fromZip)->not->toContain('Tidak Ikut')
+        ->and($invoice['totalOutstanding'])->toBe(225000)
+        ->and($fromZip)->toContain('TOTAL TUNGGAKAN')
+        ->and($fromZip)->toContain('Rp 225.000')
+        ->and($fromZip)->not->toContain('BULAN LALU')
+        ->and($direct)->toContain('Rp 525.000')
+        ->and($fromZip)->toContain('Rp 525.000')
+        ->and($direct)->toContain('Batas Pembayaran')
+        ->and($direct)->toContain('28 November 2026')
+        ->and($fromZip)->toContain('Batas Pembayaran')
+        ->and($fromZip)->toContain('28 November 2026')
+        ->and($fromZip)->not->toContain('Jatuh Tempo')
+        ->and($fromZip)->not->toContain('28/11/2026')
         ->and($invoice['confirmationReference'])->not->toContain('INV/')
         ->and($fromZip)->toContain($invoice['confirmationReference'])
         ->and($invoice['quantity'])->toBe(20)

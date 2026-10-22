@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Enums\CateringParticipantGroup;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -139,9 +141,10 @@ class CateringMemberImportService
             }
 
             $breakdown = [];
+            $defaultStartDate = CarbonImmutable::now()->toDateString();
 
             foreach ($preview['rows'] as $row) {
-                CateringMember::query()->create([
+                $member = CateringMember::query()->create([
                     'name' => $row['name'],
                     'school_class_id' => $row['school_class_id'],
                     'catering_category_id' => $row['catering_category_id'],
@@ -150,6 +153,16 @@ class CateringMemberImportService
                     'guardian_phone' => $this->nullableString($row['guardian_phone']),
                     'phone' => $this->nullableString($row['phone']),
                     'notes' => $this->nullableString($row['notes']),
+                ]);
+
+                // Every imported participant starts participating immediately:
+                // from the optional Tanggal Mulai column, or from the import date
+                // when it is blank. Never from created_at or the 2026-09-01
+                // backfill date.
+                CateringMemberPeriod::query()->create([
+                    'catering_member_id' => $member->id,
+                    'start_date' => $this->importStartDate($row['tanggal_mulai'] ?? '', $defaultStartDate),
+                    'end_date' => null,
                 ]);
 
                 $categoryName = $row['resolved_category_name'];
@@ -181,6 +194,7 @@ class CateringMemberImportService
             'guardian_phone' => $this->clean($row['guardian_phone'] ?? ''),
             'phone' => $this->clean($row['phone'] ?? ''),
             'notes' => $this->clean($row['notes'] ?? ''),
+            'tanggal_mulai' => $this->clean($row['tanggal_mulai'] ?? ''),
         ];
     }
 
@@ -199,9 +213,11 @@ class CateringMemberImportService
             'guardian_phone' => ['nullable', 'string', 'max:30'],
             'phone' => ['nullable', 'string', 'max:30'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'tanggal_mulai' => ['nullable', 'date_format:Y-m-d'],
         ], [
             'required' => ':attribute wajib diisi.',
             'gender.in' => 'Jenis Kelamin harus L atau P.',
+            'tanggal_mulai.date_format' => 'Tanggal Mulai harus berformat YYYY-MM-DD.',
         ], [
             'name' => 'Nama',
             'class_name' => 'Kelas',
@@ -211,9 +227,25 @@ class CateringMemberImportService
             'guardian_phone' => 'No HP Wali',
             'phone' => 'No HP',
             'notes' => 'Catatan',
+            'tanggal_mulai' => 'Tanggal Mulai',
         ]);
 
         return $validator->errors()->all();
+    }
+
+    /**
+     * The participation start date for a freshly imported participant.
+     *
+     * A blank Tanggal Mulai falls back to the import date, never to the
+     * 2026-09-01 backfill date reserved for pre-existing participants.
+     */
+    private function importStartDate(string $tanggalMulai, string $defaultStartDate): string
+    {
+        if ($tanggalMulai === '') {
+            return $defaultStartDate;
+        }
+
+        return CarbonImmutable::createFromFormat('Y-m-d', $tanggalMulai)->toDateString();
     }
 
     private function duplicateKey(

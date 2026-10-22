@@ -68,8 +68,9 @@
                     <p class="pt-1 font-semibold text-slate-900">Kondisional</p>
                     <p>Kelas wajib untuk kategori siswa dan harus dikosongkan untuk kategori pegawai.</p>
                     <p class="pt-1 font-semibold text-slate-900">Opsional</p>
-                    <p>Kategori, Jenis Kelamin, data wali, nomor HP, dan catatan.</p>
+                    <p>Kategori, Jenis Kelamin, data wali, nomor HP, catatan, dan Tanggal Mulai.</p>
                     <p class="pt-1 text-xs text-slate-500">Kategori kosong otomatis menggunakan Siswa Umum.</p>
+                    <p class="text-xs text-slate-500">Tanggal Mulai berformat YYYY-MM-DD. Jika kosong, peserta dihitung ikut catering sejak tanggal import.</p>
                 </div>
             </aside>
         </div>
@@ -102,13 +103,14 @@
             </div>
 
             <div class="mx-5 mb-5 max-h-[55vh] overflow-auto rounded-xl border border-slate-200 sm:mx-6 sm:mb-6">
-                <table class="table min-w-[760px]">
+                <table class="table min-w-[860px]">
                     <thead class="sticky top-0 z-10">
                         <tr>
                             <th class="w-16 text-center">No</th>
                             <th>Nama</th>
                             <th>Kelas</th>
                             <th>Kategori</th>
+                            <th>Mulai Catering</th>
                             <th class="min-w-72">Status</th>
                         </tr>
                     </thead>
@@ -119,6 +121,7 @@
                                 <td class="font-medium text-slate-900">{{ $row['name'] ?: '-' }}</td>
                                 <td class="text-slate-600">{{ $row['resolved_class_name'] ?: '-' }}</td>
                                 <td class="text-slate-600">{{ $row['resolved_category_name'] ?: '-' }}</td>
+                                <td class="text-slate-600">{{ $row['tanggal_mulai'] ?: 'Tanggal import' }}</td>
                                 <td>
                                     @if ($row['status'] === 'ready')
                                         <span class="badge-success">Siap Import</span>

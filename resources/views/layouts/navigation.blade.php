@@ -14,14 +14,18 @@
                 ['name' => 'Peserta Catering', 'href' => route('catering-members.index'), 'active' => request()->routeIs('catering-members.*'), 'icon' => 'users'],
                 ['name' => 'Kelas', 'href' => route('school-classes.index'), 'active' => request()->routeIs('school-classes.*'), 'icon' => 'class'],
                 ['name' => 'Kategori Harga', 'href' => route('catering-categories.index'), 'active' => request()->routeIs('catering-categories.*'), 'icon' => 'tag'],
+                ['name' => 'Unit Catering', 'href' => route('catering-employee-units.index'), 'active' => request()->routeIs('catering-employee-units.*'), 'icon' => 'building'],
             ] : [],
         ],
         [
             'label' => 'Catering',
             'items' => [
-                ['name' => 'Absensi Catering', 'href' => route('catering-attendance.index'), 'active' => request()->routeIs('catering-attendance.*'), 'icon' => 'calendar'],
+                ['name' => 'Absensi Siswa', 'href' => route('catering-attendance.index'), 'active' => request()->routeIs('catering-attendance.*'), 'icon' => 'calendar'],
+                ...($isAdmin ? [['name' => 'Absensi Unit', 'href' => route('catering-unit-attendance.index'), 'active' => request()->routeIs('catering-unit-attendance.*'), 'icon' => 'building']] : []),
+                ...($isAdmin ? [['name' => 'Tagihan Siswa', 'href' => route('catering-bills.index'), 'active' => request()->routeIs('catering-bills.*'), 'icon' => 'receipt']] : []),
+                ...($isAdmin ? [['name' => 'Tagihan Unit', 'href' => route('catering-unit-bills.index'), 'active' => request()->routeIs('catering-unit-bills.*'), 'icon' => 'receipt']] : []),
+                ...($isAdmin ? [['name' => 'Budaya Makan', 'href' => route('catering-culture-meal.index'), 'active' => request()->routeIs('catering-culture-meal.*'), 'icon' => 'chart']] : []),
                 ['name' => 'Rekap Absensi', 'href' => route('catering-attendance-recap.index'), 'active' => request()->routeIs('catering-attendance-recap.*'), 'icon' => 'chart'],
-                ...($isAdmin ? [['name' => 'Tagihan Bulanan', 'href' => route('catering-bills.index'), 'active' => request()->routeIs('catering-bills.*'), 'icon' => 'receipt']] : []),
                 ...($isAdmin ? [['name' => 'Laporan', 'href' => route('catering-monthly-report.index'), 'active' => request()->routeIs('catering-monthly-report.*'), 'icon' => 'document']] : []),
             ],
         ],
@@ -103,6 +107,9 @@
                                         @case('tag')
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 6.75V12l6.75 6.75a2.12 2.12 0 0 0 3 0l4.5-4.5a2.12 2.12 0 0 0 0-3L12 4.5H6.75A2.25 2.25 0 0 0 4.5 6.75Z" />
                                             <path stroke-linecap="round" d="M8.25 8.25h.008v.008H8.25z" />
+                                            @break
+                                        @case('building')
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 21V6.75h10.5V21M15 10.5h4.5V21M7.5 10.5h1.5m3 0h-1.5m-3 3.75h1.5m3 0h-1.5m-3 3.75h1.5m3 0h-1.5" />
                                             @break
                                         @case('calendar')
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3.75 8.25h16.5M5.25 4.5h13.5A1.5 1.5 0 0 1 20.25 6v13.5h-16.5V6a1.5 1.5 0 0 1 1.5-1.5Z" />

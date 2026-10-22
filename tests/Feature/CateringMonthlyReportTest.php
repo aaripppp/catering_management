@@ -13,6 +13,7 @@ use App\Services\CateringMonthlyReportExportService;
 use App\Services\CateringMonthlyReportService;
 use App\Services\CateringPaymentService;
 use Illuminate\Support\Facades\DB;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Reader\XLSX\Reader;
@@ -131,6 +132,19 @@ function monthlyReportPdfText(string $bytes): string
     return trim((string) preg_replace('/\s+/', ' ', $text));
 }
 
+function monthlyReportStatisticsMarkup(Testable $component): string
+{
+    $html = html_entity_decode($component->html(), ENT_QUOTES | ENT_HTML5);
+    preg_match('/<section id="student-payment-statistics".*?<\/section>/s', $html, $matches);
+
+    return $matches[0] ?? '';
+}
+
+function monthlyReportStatisticsText(Testable $component): string
+{
+    return trim((string) preg_replace('/\s+/', ' ', strip_tags(monthlyReportStatisticsMarkup($component))));
+}
+
 it('summarizes monthly bill cash credit outstanding overpayment and statuses separately', function () {
     monthlyReportScenario();
 
@@ -141,6 +155,7 @@ it('summarizes monthly bill cash credit outstanding overpayment and statuses sep
         'gross_amount' => 1800000,
         'money_in' => 1200000,
         'credit_used' => 100000,
+        'paid_amount' => 1300000,
         'outstanding_amount' => 600000,
         'overpayment_amount' => 100000,
         'paid_count' => 3,
@@ -297,11 +312,185 @@ it('renders header actions above filters summary and exactly three report tabs',
         ->assertSee('Rekap tagihan dan pembayaran catering per periode.')
         ->assertSeeInOrder(['Ringkasan', 'Rekap Per Kelas', 'Detail Pembayaran'])
         ->assertSee('Rp 1.800.000')
-        ->assertSee('Rp 1.200.000')
+        ->assertSee('Rp 1.300.000')
         ->assertSee('Rp 100.000')
         ->assertSee('Rp 600.000')
-        ->assertSee('3 peserta')
-        ->assertSee('1 peserta');
+        ->assertSee('Statistik Pembayaran Siswa')
+        ->assertSee('Persentase Lunas');
+});
+
+it('replaces the old financial cards with exactly five responsive student payment statistics cards', function () {
+    monthlyReportScenario();
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->set('participantGroup', CateringParticipantGroup::Student->value);
+
+    $markup = monthlyReportStatisticsMarkup($component);
+
+    expect($markup)->toContain(
+        'Statistik Pembayaran Siswa',
+        'Mengikuti filter peserta, jenjang, dan kelas yang dipilih.',
+        'grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5',
+    )->not->toContain(
+        'Total Tagihan',
+        'Jumlah Uang Masuk',
+        'Kredit Digunakan',
+        'Total Tunggakan',
+        'Total Lebih Bayar',
+    );
+
+    expect(substr_count($markup, 'class="card flex min-h-40 flex-col p-5"'))->toBe(5)
+        ->and(substr_count($markup, '>Peserta Ditagih<'))->toBe(1)
+        ->and(substr_count($markup, '>Jumlah Lunas<'))->toBe(1)
+        ->and(substr_count($markup, '>Jumlah Sebagian<'))->toBe(1)
+        ->and(substr_count($markup, '>Jumlah Belum Bayar<'))->toBe(1)
+        ->and(substr_count($markup, '>Persentase Lunas<'))->toBe(1);
+});
+
+it('shows filtered participant payment statuses and a clean paid percentage', function () {
+    monthlyReportScenario();
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->set('participantGroup', CateringParticipantGroup::Student->value);
+
+    $studentStatistics = monthlyReportStatisticsText($component);
+    $component->set('participantGroup', CateringParticipantGroup::Employee->value);
+    $employeeStatistics = monthlyReportStatisticsText($component);
+
+    expect($studentStatistics)->toContain(
+        'Peserta Ditagih 4 peserta',
+        'Jumlah Lunas 2 peserta',
+        'Jumlah Sebagian 1 peserta',
+        'Jumlah Belum Bayar 1 peserta',
+        'Persentase Lunas 50%',
+    );
+    expect($employeeStatistics)->toContain(
+        'Peserta Ditagih 1 peserta',
+        'Jumlah Lunas 1 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 100%',
+    );
+});
+
+it('shows zero-safe student payment statistics for a period without participants', function () {
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2025)
+        ->set('participantGroup', CateringParticipantGroup::Student->value);
+
+    $statistics = monthlyReportStatisticsText($component);
+
+    expect($statistics)->toContain(
+        'Peserta Ditagih 0 peserta',
+        'Jumlah Lunas 0 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 0%',
+    )->not->toContain('NAN', 'INF');
+});
+
+it('updates all student payment statistics for class and jenjang filters', function () {
+    ['class2A' => $class2A, 'class10A' => $class10A] = monthlyReportScenario();
+    $additionalPaidBill = CateringBill::factory()->create([
+        'school_class_id' => $class2A->id,
+        'school_class_name' => '2A',
+        'school_level' => '2',
+        'member_name' => 'Fani Lunas',
+        'gross_amount' => 400000,
+    ]);
+    app(CateringPaymentService::class)->record($additionalPaidBill, 400000);
+    CateringBill::factory()->count(2)->create([
+        'school_class_id' => $class10A->id,
+        'school_class_name' => '10A',
+        'school_level' => '10',
+        'gross_amount' => 400000,
+    ]);
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->set('participantGroup', CateringParticipantGroup::Student->value)
+        ->set('schoolClassId', (string) $class2A->id);
+
+    $class2AStatistics = monthlyReportStatisticsText($component);
+    $component->set('schoolClassId', (string) $class10A->id);
+    $class10AStatistics = monthlyReportStatisticsText($component);
+    $component->set('schoolClassId', '')->set('jenjang', 'SD');
+    $sdStatistics = monthlyReportStatisticsText($component);
+    $component->set('jenjang', 'SMA');
+    $smaStatistics = monthlyReportStatisticsText($component);
+
+    expect($class2AStatistics)->toContain(
+        'Peserta Ditagih 3 peserta',
+        'Jumlah Lunas 2 peserta',
+        'Jumlah Sebagian 1 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 66,7%',
+    );
+    expect($class10AStatistics)->toContain(
+        'Peserta Ditagih 4 peserta',
+        'Jumlah Lunas 1 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 3 peserta',
+        'Persentase Lunas 25%',
+    );
+    expect($sdStatistics)->toContain(
+        'Peserta Ditagih 3 peserta',
+        'Jumlah Lunas 2 peserta',
+        'Jumlah Sebagian 1 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 66,7%',
+    );
+    expect($smaStatistics)->toContain(
+        'Peserta Ditagih 4 peserta',
+        'Jumlah Lunas 1 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 3 peserta',
+        'Persentase Lunas 25%',
+    );
+});
+
+it('updates all student payment statistics for month and year filters', function () {
+    monthlyReportScenario();
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('participantGroup', CateringParticipantGroup::Student->value)
+        ->set('month', 10)
+        ->set('year', 2026);
+
+    $octoberStatistics = monthlyReportStatisticsText($component);
+    $component->set('month', 9);
+    $septemberStatistics = monthlyReportStatisticsText($component);
+    $component->set('year', 2025);
+    $emptyYearStatistics = monthlyReportStatisticsText($component);
+
+    expect($octoberStatistics)->toContain(
+        'Peserta Ditagih 4 peserta',
+        'Jumlah Lunas 2 peserta',
+        'Jumlah Sebagian 1 peserta',
+        'Jumlah Belum Bayar 1 peserta',
+        'Persentase Lunas 50%',
+    );
+    expect($septemberStatistics)->toContain(
+        'Peserta Ditagih 1 peserta',
+        'Jumlah Lunas 1 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 100%',
+    );
+    expect($emptyYearStatistics)->toContain(
+        'Peserta Ditagih 0 peserta',
+        'Jumlah Lunas 0 peserta',
+        'Jumlah Sebagian 0 peserta',
+        'Jumlah Belum Bayar 0 peserta',
+        'Persentase Lunas 0%',
+    );
 });
 
 it('refreshes every tab using the selected combined scope', function () {

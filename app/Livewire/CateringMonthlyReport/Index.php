@@ -8,9 +8,11 @@ use App\Models\CateringBill;
 use App\Models\SchoolClass;
 use App\Services\CateringMonthlyReportExportService;
 use App\Services\CateringMonthlyReportService;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -32,12 +34,19 @@ class Index extends Component
 
     public string $tab = 'summary';
 
+    public string $incomeFromDate;
+
+    public string $incomeToDate;
+
     public function mount(): void
     {
         Gate::authorize('viewAny', CateringBill::class);
 
         $this->month = now()->month;
         $this->year = now()->year;
+        $today = CarbonImmutable::today((string) config('app.timezone'));
+        $this->incomeFromDate = $today->startOfMonth()->toDateString();
+        $this->incomeToDate = $today->toDateString();
     }
 
     public function updated(string $property): void
@@ -58,6 +67,16 @@ class Index extends Component
     public function updatedJenjang(): void
     {
         $this->schoolClassId = '';
+    }
+
+    public function updatedIncomeFromDate(): void
+    {
+        $this->validate($this->incomeDateRangeRules());
+    }
+
+    public function updatedIncomeToDate(): void
+    {
+        $this->validate($this->incomeDateRangeRules());
     }
 
     public function setTab(string $tab): void
@@ -83,8 +102,18 @@ class Index extends Component
     {
         Gate::authorize('viewAny', CateringBill::class);
         $filters = $this->filters();
+        $actualIncome = ['student' => 0, 'unit' => 0, 'culture' => 0, 'total' => 0];
+
+        if (Validator::make([
+            'incomeFromDate' => $this->incomeFromDate,
+            'incomeToDate' => $this->incomeToDate,
+        ], $this->incomeDateRangeRules())->passes()) {
+            $actualIncome = $reportService->actualIncomeForDateRange($this->incomeFromDate, $this->incomeToDate);
+        }
 
         return view('livewire.catering-monthly-report.index', [
+            'actualIncome' => $actualIncome,
+            'financialOverview' => $reportService->financialOverview($this->month, $this->year),
             'summary' => $reportService->summary($filters),
             'groups' => $this->tab === 'groups' ? $reportService->groupRows($filters) : null,
             'details' => $this->tab === 'details' ? $reportService->paginateDetails($filters) : null,
@@ -125,6 +154,15 @@ class Index extends Component
         ]);
 
         return $this->filters();
+    }
+
+    /** @return array<string, array<int, string>> */
+    private function incomeDateRangeRules(): array
+    {
+        return [
+            'incomeFromDate' => ['required', 'date'],
+            'incomeToDate' => ['required', 'date', 'after_or_equal:incomeFromDate'],
+        ];
     }
 
     /** @return array<int, array{id: int, name: string}> */

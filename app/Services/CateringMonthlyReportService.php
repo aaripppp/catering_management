@@ -4,13 +4,17 @@ namespace App\Services;
 
 use App\Enums\CateringBillStatus;
 use App\Enums\CateringParticipantGroup;
+use App\Enums\CateringUnitBillSyncStatus;
 use App\Enums\SchoolLevel;
 use App\Models\SchoolClass;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class CateringMonthlyReportService
 {
@@ -30,9 +34,120 @@ class CateringMonthlyReportService
         12 => 'Desember',
     ];
 
+    public function __construct(
+        private CateringUnitPaymentService $unitPaymentService,
+        private CateringUnitBillingService $unitBillingService,
+        private CateringCultureMealMonitoringService $cultureMealMonitoringService,
+        private CateringCultureMealIncomeService $cultureMealIncomeService,
+        private CateringCultureMealSettingService $cultureMealSettingService,
+    ) {}
+
+    /**
+     * @return array{
+     *     student: array{billed: int, paid: int, remaining: int},
+     *     unit: array{billed: int, paid: int, remaining: int, overpaid: int, paid_count: int, partial_count: int, unpaid_count: int, has_stale: bool, stale_count: int},
+     *     culture: array{recorded_count: int, price: int, billed: int, income: int, difference: int},
+     *     total: array{billed: int, paid: int, uncovered_difference: int}
+     * }
+     */
+    public function financialOverview(int $month, int $year): array
+    {
+        $studentSummary = $this->summary([
+            'month' => $month,
+            'year' => $year,
+            'participantGroup' => CateringParticipantGroup::Student->value,
+            'jenjang' => '',
+            'schoolClassId' => '',
+        ]);
+        $student = [
+            'billed' => $studentSummary['gross_amount'],
+            'paid' => $studentSummary['paid_amount'],
+            'remaining' => $studentSummary['outstanding_amount'],
+        ];
+
+        $unitSummary = $this->unitPaymentService->periodSummary($month, $year);
+        $staleUnitBillCount = $this->unitBillingService
+            ->periodStatus($month, $year)
+            ->filter(fn (array $row): bool => $row['status'] === CateringUnitBillSyncStatus::Stale)
+            ->count();
+        $unit = [
+            'billed' => $unitSummary['total_billed'],
+            'paid' => $unitSummary['total_paid'],
+            'remaining' => $unitSummary['total_remaining'],
+            'overpaid' => $unitSummary['total_overpaid'],
+            'paid_count' => $unitSummary['paid_count'],
+            'partial_count' => $unitSummary['partial_count'],
+            'unpaid_count' => $unitSummary['unpaid_count'],
+            'has_stale' => $staleUnitBillCount > 0,
+            'stale_count' => $staleUnitBillCount,
+        ];
+
+        $cultureMonitoring = $this->cultureMealMonitoringService->monitor($month, $year);
+        $culturePrice = $this->cultureMealSettingService->getCultureMealPrice();
+        $cultureBilled = $cultureMonitoring['total'] * $culturePrice;
+        $cultureIncome = $this->cultureMealIncomeService->monthlyTotal($month, $year);
+        $culture = [
+            'recorded_count' => $cultureMonitoring['total'],
+            'price' => $culturePrice,
+            'billed' => $cultureBilled,
+            'income' => $cultureIncome,
+            'difference' => $cultureBilled - $cultureIncome,
+        ];
+
+        return [
+            'student' => $student,
+            'unit' => $unit,
+            'culture' => $culture,
+            'total' => [
+                'billed' => $student['billed'] + $unit['billed'] + $culture['billed'],
+                'paid' => $student['paid'] + $unit['paid'] + $culture['income'],
+                'uncovered_difference' => $student['remaining'] + $unit['remaining'] + max($culture['difference'], 0),
+            ],
+        ];
+    }
+
+    /** @return array{student: int, unit: int, culture: int, total: int} */
+    public function actualIncomeForDateRange(CarbonInterface|string $from, CarbonInterface|string $to): array
+    {
+        $timezone = (string) config('app.timezone');
+        $fromDate = $from instanceof CarbonInterface
+            ? CarbonImmutable::instance($from)->setTimezone($timezone)->startOfDay()
+            : CarbonImmutable::parse($from, $timezone)->startOfDay();
+        $toDate = $to instanceof CarbonInterface
+            ? CarbonImmutable::instance($to)->setTimezone($timezone)->startOfDay()
+            : CarbonImmutable::parse($to, $timezone)->startOfDay();
+
+        if ($toDate->lt($fromDate)) {
+            throw new InvalidArgumentException('Tanggal akhir pemasukan harus sama atau setelah tanggal awal.');
+        }
+
+        $upperBound = $toDate->addDay();
+        $student = (int) DB::table('catering_payments')
+            ->join('catering_bills', 'catering_bills.id', '=', 'catering_payments.catering_bill_id')
+            ->where('catering_bills.participant_group', CateringParticipantGroup::Student->value)
+            ->where('catering_payments.paid_at', '>=', $fromDate)
+            ->where('catering_payments.paid_at', '<', $upperBound)
+            ->sum('catering_payments.amount');
+        $unit = (int) DB::table('catering_unit_payments')
+            ->where('paid_at', '>=', $fromDate)
+            ->where('paid_at', '<', $upperBound)
+            ->sum('amount');
+        $culture = (int) DB::table('catering_culture_meal_incomes')
+            ->where('income_date', '>=', $fromDate->toDateString())
+            ->where('income_date', '<', $upperBound->toDateString())
+            ->sum('amount');
+
+        return [
+            'student' => $student,
+            'unit' => $unit,
+            'culture' => $culture,
+            'total' => $student + $unit + $culture,
+        ];
+    }
+
     /**
      * @param  array{month: int, year: int, participantGroup: string, jenjang: string, schoolClassId: string}  $filters
-     * @return array{bill_count: int, gross_amount: int, money_in: int, credit_used: int, outstanding_amount: int, overpayment_amount: int, paid_count: int, partial_count: int, unpaid_count: int}
+     * @return array{bill_count: int, gross_amount: int, money_in: int, credit_used: int, paid_amount: int, outstanding_amount: int, overpayment_amount: int, paid_count: int, partial_count: int, unpaid_count: int}
      */
     public function summary(array $filters): array
     {
@@ -42,6 +157,7 @@ class CateringMonthlyReportService
             ->selectRaw('COALESCE(SUM(gross_amount), 0) as gross_amount')
             ->selectRaw('COALESCE(SUM(paid_amount), 0) as money_in')
             ->selectRaw('COALESCE(SUM(credit_applied_amount), 0) as credit_used')
+            ->selectRaw('COALESCE(SUM(paid_amount + credit_applied_amount), 0) as paid_amount')
             ->selectRaw('COALESCE(SUM(outstanding_amount), 0) as outstanding_amount')
             ->selectRaw('COALESCE(SUM(generated_credit_amount), 0) as overpayment_amount')
             ->selectRaw('SUM(CASE WHEN payment_status = ? THEN 1 ELSE 0 END) as paid_count', [CateringBillStatus::Paid->value])
@@ -54,6 +170,7 @@ class CateringMonthlyReportService
             'gross_amount' => (int) ($row?->gross_amount ?? 0),
             'money_in' => (int) ($row?->money_in ?? 0),
             'credit_used' => (int) ($row?->credit_used ?? 0),
+            'paid_amount' => (int) ($row?->paid_amount ?? 0),
             'outstanding_amount' => (int) ($row?->outstanding_amount ?? 0),
             'overpayment_amount' => (int) ($row?->overpayment_amount ?? 0),
             'paid_count' => (int) ($row?->paid_count ?? 0),

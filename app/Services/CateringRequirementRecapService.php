@@ -7,10 +7,10 @@ use App\Enums\CateringEmployeeAssignmentType;
 use App\Enums\CateringParticipantGroup;
 use App\Enums\SchoolLevel;
 use App\Models\CateringAttendance;
+use App\Models\CateringMember;
 use App\Models\SchoolClass;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Builds the "Kebutuhan Catering per Tanggal" recap.
@@ -39,7 +39,7 @@ class CateringRequirementRecapService
 
         $classes = self::classMap();
         $portions = self::portionRows($dateString);
-        $coverage = self::coverage();
+        $coverage = self::coverage($dateString);
         $dayStats = self::dayStats($dateString);
 
         $recap = self::emptyRecap($date);
@@ -97,7 +97,9 @@ class CateringRequirementRecapService
     {
         [$start, $end] = self::dayBounds($dateString);
 
-        return DB::table('catering_attendances')
+        return CateringAttendance::query()
+            ->coveredByMembership()
+            ->toBase()
             ->select([
                 'catering_attendances.catering_member_id',
                 'catering_members.name',
@@ -148,9 +150,11 @@ class CateringRequirementRecapService
      *
      * @return array{participants: int, students: int, employees: int, unassignedEmployees: int}
      */
-    private static function coverage(): array
+    private static function coverage(string $dateString): array
     {
-        $rows = DB::table('catering_members')
+        $rows = CateringMember::query()
+            ->participatingOn($dateString)
+            ->toBase()
             ->join('catering_categories', 'catering_categories.id', '=', 'catering_members.catering_category_id')
             ->leftJoin(
                 'catering_employee_assignments',
@@ -200,6 +204,7 @@ class CateringRequirementRecapService
         [$start, $end] = self::dayBounds($dateString);
 
         $stats = CateringAttendance::query()
+            ->coveredByMembership()
             ->where('attendance_date', '>=', $start)
             ->where('attendance_date', '<', $end)
             ->selectRaw('COUNT(*) as total')

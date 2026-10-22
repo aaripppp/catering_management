@@ -6,6 +6,7 @@ use App\Livewire\CateringAttendance\Index as CateringAttendanceIndex;
 use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use Livewire\Features\SupportTesting\Testable;
@@ -18,6 +19,12 @@ function openCateringAttendanceMatrix(
     int $month = 9,
     string $jenjang = 'SMP',
 ): Testable {
+    CateringMember::query()
+        ->where('school_class_id', $schoolClass->id)
+        ->whereDoesntHave('periods')
+        ->get()
+        ->each(fn (CateringMember $member) => giveAttendancePeriod($member));
+
     return Livewire::actingAs($user)
         ->test(CateringAttendanceIndex::class)
         ->call('changeFilter', 'participantGroup', CateringParticipantGroup::Student->value)
@@ -41,6 +48,18 @@ function attendanceStatusOn(int $memberId, string $date): ?CateringAttendanceSta
         ->first(fn (CateringAttendance $attendance): bool => $attendance->attendance_date->isSameDay($date));
 
     return $row?->status;
+}
+
+/**
+ * Give a member an open participation period from the start of September 2026.
+ */
+function giveAttendancePeriod(CateringMember $member, string $start = '2026-09-01'): void
+{
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => $start,
+        'end_date' => null,
+    ]);
 }
 
 it('redirects guests away from the catering attendance page', function () {
@@ -202,6 +221,7 @@ it('renders a saved alfa row as budaya makan in the matrix', function () {
 it('marks and restores a whole weekday column', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
+    $members->each(fn (CateringMember $member) => giveAttendancePeriod($member));
     $component = openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass);
 
     $component->call('setDateStatus', '2026-09-01', 'libur');
@@ -220,6 +240,7 @@ it('marks and restores a whole weekday column', function () {
 it('auto saves a single cell and dispatches no manual save toast', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
+    $members->each(fn (CateringMember $member) => giveAttendancePeriod($member));
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $members[0]->id, '2026-09-01', 'sakit')
@@ -234,6 +255,7 @@ it('auto saves a single cell and dispatches no manual save toast', function () {
 it('updates an existing cell without creating a duplicate row', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveAttendancePeriod($member);
     $component = openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass);
 
     $component->call('setCellStatus', $member->id, '2026-09-01', 'tidak_ikut')
@@ -247,6 +269,7 @@ it('limits a whole date change to active participants in the loaded class and gr
     $selectedClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $otherClass = SchoolClass::factory()->create(['name' => '7B', 'level' => '7']);
     $selectedMember = CateringMember::factory()->create(['school_class_id' => $selectedClass->id]);
+    giveAttendancePeriod($selectedMember);
     $otherMember = CateringMember::factory()->create(['school_class_id' => $otherClass->id]);
     $inactiveMember = CateringMember::factory()->inactive()->create(['school_class_id' => $selectedClass->id]);
     $employee = CateringMember::factory()->withoutClass()->create([
@@ -288,6 +311,7 @@ it('does not change attendance belonging to another month', function () {
 it('rejects an invalid attendance status before writing', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveAttendancePeriod($member);
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $member->id, '2026-09-01', 'hadir-sebagian')
@@ -299,6 +323,7 @@ it('rejects an invalid attendance status before writing', function () {
 it('reloads all previously saved statuses for the same class and month', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveAttendancePeriod($member);
     $user = User::factory()->admin()->create();
 
     openCateringAttendanceMatrix($user, $schoolClass)
@@ -336,6 +361,7 @@ it('renders active and off in the attendance modal with the existing colors', fu
 it('uses active and off labels in attendance matrix cell descriptions', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['name' => 'Siswa Label', 'school_class_id' => $schoolClass->id]);
+    giveAttendancePeriod($member);
     $component = openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass);
 
     $component
@@ -451,14 +477,16 @@ it('keeps the student and employee groups apart when a category is renamed', fun
 
 it('loads employee participants without jenjang or class selection', function () {
     $employeeCategory = CateringCategory::factory()->employee()->create(['name' => 'Guru']);
-    CateringMember::factory()->withoutClass()->create([
+    $employee = CateringMember::factory()->withoutClass()->create([
         'name' => 'Pegawai Tanpa Kelas',
         'catering_category_id' => $employeeCategory->id,
     ]);
-    CateringMember::factory()->create([
+    $student = CateringMember::factory()->create([
         'name' => 'Siswa Ada Kelas',
         'catering_category_id' => CateringCategory::factory()->student()->create(),
     ]);
+    giveAttendancePeriod($employee);
+    giveAttendancePeriod($student);
 
     Livewire::actingAs(User::factory()->admin()->create())
         ->test(CateringAttendanceIndex::class)
@@ -491,6 +519,7 @@ it('switches straight to the employee matrix when the group changes', function (
 it('summarizes every attendance status in the current matrix', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveAttendancePeriod($member);
 
     openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
         ->call('setCellStatus', $member->id, '2026-09-01', 'sakit')

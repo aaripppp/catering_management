@@ -24,7 +24,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             SchoolClassSeeder::class,
             CateringCategorySeeder::class,
+            CateringEmployeeUnitSeeder::class,
             CateringMemberSeeder::class,
+            CateringSettingSeeder::class,
         ]);
 
         if (app()->isProduction()) {

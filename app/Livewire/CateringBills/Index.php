@@ -12,6 +12,7 @@ use App\Models\CateringCreditAllocation;
 use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Services\CateringBillingService;
+use App\Services\CateringBillResetService;
 use App\Services\CateringPaymentService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
@@ -56,6 +57,15 @@ class Index extends Component
     public bool $showDeletePaymentModal = false;
 
     public ?int $deletingPaymentId = null;
+
+    public bool $showResetBillsModal = false;
+
+    public ?int $resetBillMonth = null;
+
+    public ?int $resetBillYear = null;
+
+    /** @var array<string, int|bool> */
+    public array $resetBillSummary = [];
 
     public function mount(): void
     {
@@ -110,6 +120,58 @@ class Index extends Component
                 $result['created'],
                 $result['regenerated'],
             ),
+        );
+    }
+
+    public function confirmResetBills(CateringBillResetService $resetService): void
+    {
+        Gate::authorize('resetPeriod', CateringBill::class);
+        $validated = $this->validatePeriod();
+
+        $this->resetBillMonth = $validated['month'];
+        $this->resetBillYear = $validated['year'];
+        $this->resetBillSummary = $resetService->preview($validated['year'], $validated['month']);
+        $this->showResetBillsModal = true;
+    }
+
+    public function closeResetBillsModal(): void
+    {
+        $this->showResetBillsModal = false;
+        $this->resetBillMonth = null;
+        $this->resetBillYear = null;
+        $this->resetBillSummary = [];
+    }
+
+    public function resetBills(CateringBillResetService $resetService): void
+    {
+        Gate::authorize('resetPeriod', CateringBill::class);
+
+        if ($this->resetBillMonth === null || $this->resetBillYear === null) {
+            return;
+        }
+
+        $result = $resetService->reset($this->resetBillYear, $this->resetBillMonth);
+
+        if (! $result['can_reset']) {
+            $this->resetBillSummary = $result;
+            $this->dispatch(
+                'toast',
+                type: 'danger',
+                message: 'Tagihan periode ini memiliki transaksi pembayaran atau data finansial terkait dan tidak dapat direset.',
+            );
+
+            return;
+        }
+
+        $deletedCount = $result['deleted_count'];
+        $this->closeResetBillsModal();
+        $this->resetPage();
+        $this->dispatch(
+            'toast',
+            type: $deletedCount === 0 ? 'info' : 'danger',
+            message: $deletedCount === 0
+                ? 'Tidak ada tagihan pada periode ini yang perlu direset.'
+                : sprintf('%d tagihan berhasil direset. Data absensi tetap tersimpan.', $deletedCount),
         );
     }
 
@@ -264,6 +326,7 @@ class Index extends Component
         $bills = $baseQuery
             ->addSelect([
                 'current_active_days' => CateringAttendance::query()
+                    ->coveredByMembership()
                     ->selectRaw('COUNT(*)')
                     ->whereColumn('catering_member_id', 'catering_bills.catering_member_id')
                     ->where('attendance_date', '>=', $periodStart->toDateString())
@@ -315,6 +378,15 @@ class Index extends Component
             'participantGroup' => ['required', Rule::enum(CateringParticipantGroup::class)],
             'jenjang' => ['nullable', Rule::in(SchoolLevel::educationLevels())],
             'schoolClassId' => ['nullable', 'integer', Rule::exists('school_classes', 'id')],
+        ]);
+    }
+
+    /** @return array{month: int, year: int} */
+    private function validatePeriod(): array
+    {
+        return $this->validate([
+            'month' => ['required', 'integer', 'between:1,12'],
+            'year' => ['required', 'integer', 'between:2020,2100'],
         ]);
     }
 

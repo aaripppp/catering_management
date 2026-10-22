@@ -10,6 +10,7 @@ use App\Models\CateringCategory;
 use App\Models\CateringCredit;
 use App\Models\CateringCreditAllocation;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
@@ -31,6 +32,47 @@ it('protects the monthly billing page for administrators', function () {
         ->assertSee('Tagihan Bulanan');
 });
 
+it('does not flag a synchronized bill for stored attendance outside membership', function () {
+    $admin = User::factory()->admin()->create();
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 15000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-10-01',
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-01',
+        'status' => CateringAttendanceStatus::Ikut,
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-02',
+        'status' => CateringAttendanceStatus::Ikut,
+    ]);
+    app(CateringBillingService::class)->generate(
+        2026,
+        10,
+        CateringParticipantGroup::Student,
+        $schoolClass,
+        actor: $admin,
+    );
+
+    Livewire::actingAs($admin)
+        ->test(CateringBillIndex::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertSee('Ahmad Zaki')
+        ->assertDontSee('Perlu sinkronisasi');
+
+    expect(CateringAttendance::query()->where('catering_member_id', $member->id)->count())->toBe(2)
+        ->and(CateringBill::query()->sole()->active_days)->toBe(1);
+});
+
 it('generates bills for the selected period and class', function () {
     $admin = User::factory()->admin()->create();
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
@@ -40,6 +82,7 @@ it('generates bills for the selected period and class', function () {
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     CateringAttendance::factory()->count(4)->sequence(
         fn ($sequence): array => [
             'attendance_date' => now()->startOfMonth()->addDays($sequence->index)->toDateString(),
@@ -79,6 +122,7 @@ it('immediately shows corrected category price and financial state after sync', 
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $originalCategory->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => now()->startOfMonth()->toDateString(), 'end_date' => null]);
     CateringAttendance::factory()->count(22)->sequence(
         fn ($sequence): array => [
             'attendance_date' => now()->startOfMonth()->addDays($sequence->index)->toDateString(),
@@ -299,6 +343,7 @@ it('keeps carried credit separate from cash in the period where it is applied', 
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
 
     foreach ([[9, '2026-09-01'], [10, '2026-10-01']] as [$month, $startDate]) {
         CateringAttendance::factory()->count(20)->sequence(
@@ -489,6 +534,7 @@ it('defaults a new payment to the latest remaining amount after resync', functio
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => now()->startOfMonth()->toDateString(), 'end_date' => null]);
     CateringAttendance::factory()->count(20)->sequence(
         fn ($sequence): array => [
             'attendance_date' => now()->startOfMonth()->addDays($sequence->index)->toDateString(),

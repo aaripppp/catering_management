@@ -8,8 +8,10 @@ use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Features\SupportTesting\Testable;
@@ -36,11 +38,30 @@ function autoSaveClass(string $name = '7A'): SchoolClass
 
 function autoSaveMember(SchoolClass $schoolClass, string $name = 'Siswa'): CateringMember
 {
-    return CateringMember::factory()->create([
+    $member = CateringMember::factory()->create([
         'name' => $name,
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => CateringCategory::factory()->student()->create()->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+
+    return $member;
+}
+
+/**
+ * Give every member an open participation period from the start of September 2026.
+ *
+ * @param  iterable<CateringMember>  $members
+ */
+function autoSavePeriods(iterable $members, string $start = '2026-09-01'): void
+{
+    foreach ($members as $member) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $member->id,
+            'start_date' => $start,
+            'end_date' => null,
+        ]);
+    }
 }
 
 /**
@@ -75,6 +96,9 @@ function storedRowsFor(int $memberId): array
 it('creates one attendance row per active participant per day when the context is opened', function () {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
+    foreach ($members as $m) {
+        CateringMemberPeriod::create(['catering_member_id' => $m->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+    }
 
     autoSaveMatrix($schoolClass);
 
@@ -194,6 +218,38 @@ it('does not initialise inactive participants', function () {
         ->and(CateringAttendance::query()->where('catering_member_id', $active->id)->count())->toBe(30);
 });
 
+it('renders attendance only inside the membership period while preserving later stored rows', function () {
+    $schoolClass = autoSaveClass();
+    $member = CateringMember::factory()->create([
+        'name' => 'Siswa Periodik',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => CateringCategory::factory()->student()->create()->id,
+    ]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-09-05',
+        'end_date' => '2026-09-07',
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-09-08',
+        'status' => CateringAttendanceStatus::Sakit,
+    ]);
+
+    autoSaveMatrix($schoolClass)
+        ->assertSet("attendanceEligibility.{$member->id}.2026-09-04", false)
+        ->assertSet("attendance.{$member->id}.2026-09-04", null)
+        ->assertSet("attendanceEligibility.{$member->id}.2026-09-05", true)
+        ->assertSet("attendanceEligibility.{$member->id}.2026-09-07", true)
+        ->assertSet("attendanceEligibility.{$member->id}.2026-09-08", false)
+        ->assertSet("attendance.{$member->id}.2026-09-08", null)
+        ->assertSeeHtml("wire:click=\"openStatusMenu({$member->id}, '2026-09-05')\"")
+        ->assertDontSeeHtml("wire:click=\"openStatusMenu({$member->id}, '2026-09-08')\"")
+        ->assertSeeHtml('aria-label="Siswa Periodik tidak terdaftar pada tanggal 8 September 2026"')
+        ->assertSeeHtml('&mdash;');
+
+    expect(storedStatus($member->id, '2026-09-08'))->toBe(CateringAttendanceStatus::Sakit);
+});
+
 it('initialises active participants from every class when one class is opened', function () {
     $schoolClass = autoSaveClass('7A');
     $otherClass = autoSaveClass('7B');
@@ -222,6 +278,7 @@ it('initialises the employee group without needing a class', function () {
         'name' => 'Pegawai',
         'catering_category_id' => $category->id,
     ]);
+    autoSavePeriods([$employee]);
 
     Livewire::actingAs(User::factory()->admin()->create())
         ->test(CateringAttendanceIndex::class)
@@ -392,6 +449,23 @@ it('rejects a cell that is not part of the loaded matrix', function () {
     expect(storedStatus($member->id, '2026-12-25'))->toBeNull();
 });
 
+it('rejects a cell newly outside membership using fresh database coverage', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+    $component = autoSaveMatrix($schoolClass);
+
+    CateringMemberPeriod::query()
+        ->where('catering_member_id', $member->id)
+        ->update(['end_date' => '2026-09-05']);
+
+    $component
+        ->call('setCellStatus', $member->id, '2026-09-06', CateringAttendanceStatus::Sakit->value)
+        ->assertHasErrors(['attendance'])
+        ->assertSet("attendance.{$member->id}.2026-09-06", CateringAttendanceStatus::Libur->value);
+
+    expect(storedStatus($member->id, '2026-09-06'))->toBe(CateringAttendanceStatus::Libur);
+});
+
 it('rejects a member that is not part of the loaded matrix', function () {
     $schoolClass = autoSaveClass();
     $otherClass = autoSaveClass('7B');
@@ -436,6 +510,7 @@ it('rejects a cell change from a guest', function () {
 it('persists every supported whole date status for every participant in the context', function (CateringAttendanceStatus $status) {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
 
     autoSaveMatrix($schoolClass)
         ->call('setDateStatus', '2026-09-01', $status->value)
@@ -449,6 +524,7 @@ it('persists every supported whole date status for every participant in the cont
 it('saves the budaya makan bulk choice as alfa only in the loaded scope', function () {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
     $otherClass = autoSaveClass('7B');
     $outsideMember = autoSaveMember($otherClass, 'Siswa Luar Kelas');
 
@@ -513,6 +589,7 @@ it('rejects an unknown whole date status', function () {
 it('allows an individual cell to override a whole date status', function () {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(2)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
     $component = autoSaveMatrix($schoolClass);
 
     $component
@@ -569,7 +646,8 @@ it('restores the whole date when a bulk change cannot be written', function () {
 
 it('initialises a large class without a query per participant or per day', function () {
     $schoolClass = autoSaveClass();
-    CateringMember::factory()->count(30)->create(['school_class_id' => $schoolClass->id]);
+    $members = CateringMember::factory()->count(30)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
 
     $queries = 0;
     DB::listen(function () use (&$queries): void {
@@ -587,6 +665,7 @@ it('initialises a large class without a query per participant or per day', funct
 it('changes one cell without a query per participant', function () {
     $schoolClass = autoSaveClass();
     $members = CateringMember::factory()->count(30)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
     $component = autoSaveMatrix($schoolClass);
 
     $queries = 0;
@@ -601,7 +680,8 @@ it('changes one cell without a query per participant', function () {
 
 it('changes a whole date with a bounded number of queries', function () {
     $schoolClass = autoSaveClass();
-    CateringMember::factory()->count(30)->create(['school_class_id' => $schoolClass->id]);
+    $members = CateringMember::factory()->count(30)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
     $component = autoSaveMatrix($schoolClass);
 
     $queries = 0;
@@ -612,6 +692,37 @@ it('changes a whole date with a bounded number of queries', function () {
     $component->call('setDateStatus', '2026-09-01', 'libur');
 
     expect($queries)->toBeLessThan(5);
+});
+
+it('refreshes membership periods in one query before bulk updating only covered displayed members', function () {
+    $schoolClass = autoSaveClass();
+    $members = CateringMember::factory()->count(3)->create(['school_class_id' => $schoolClass->id]);
+    autoSavePeriods($members);
+    $component = autoSaveMatrix($schoolClass);
+    $stoppedMember = $members->first();
+
+    CateringMemberPeriod::query()
+        ->where('catering_member_id', $stoppedMember->id)
+        ->update(['end_date' => '2026-09-05']);
+
+    $periodQueries = [];
+    DB::listen(function (QueryExecuted $query) use (&$periodQueries): void {
+        if (str_contains($query->sql, 'catering_member_periods')) {
+            $periodQueries[] = $query->sql;
+        }
+    });
+
+    $component
+        ->call('setDateStatus', '2026-09-07', CateringAttendanceStatus::Sakit->value)
+        ->assertHasNoErrors()
+        ->assertSet("attendance.{$stoppedMember->id}.2026-09-07", CateringAttendanceStatus::Ikut->value);
+
+    expect($periodQueries)->toHaveCount(1);
+    expect(storedStatus($stoppedMember->id, '2026-09-07'))->toBe(CateringAttendanceStatus::Ikut);
+
+    foreach ($members->skip(1) as $coveredMember) {
+        expect(storedStatus($coveredMember->id, '2026-09-07'))->toBe(CateringAttendanceStatus::Sakit);
+    }
 });
 
 /*
@@ -627,6 +738,7 @@ it('feeds the requirement recap from initialised attendance', function () {
         'name' => 'Pegawai Rekap',
         'catering_category_id' => CateringCategory::factory()->employee()->create()->id,
     ]);
+    autoSavePeriods([$employee]);
 
     $employeeMatrix = Livewire::actingAs(User::factory()->admin()->create())
         ->test(CateringAttendanceIndex::class)
@@ -708,6 +820,11 @@ it('keeps a general employee detail modal open across a poll', function () {
     CateringEmployeeAssignment::factory()->general()->create(['catering_member_id' => $second->id]);
 
     foreach ([$first, $second] as $employee) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $employee->id,
+            'start_date' => '2026-09-01',
+            'end_date' => null,
+        ]);
         CateringAttendance::factory()->for($employee)->create([
             'attendance_date' => '2026-09-30',
             'status' => CateringAttendanceStatus::Ikut,

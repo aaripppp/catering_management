@@ -5,6 +5,7 @@ use App\Enums\CateringParticipantGroup;
 use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Services\CateringAttendanceInitializerService;
 use App\Services\CateringInvoiceService;
@@ -59,6 +60,12 @@ it('produces real pdf and zip artifacts for review', function () {
     ]);
 
     foreach ($members as $member) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $member->id,
+            'start_date' => '2026-09-01',
+            'end_date' => null,
+        ]);
+
         for ($day = 1; $day <= 20; $day++) {
             CateringAttendance::factory()->for($member)->create([
                 'attendance_date' => sprintf('2026-09-%02d', $day),
@@ -152,6 +159,14 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         'catering_category_id' => $category->id,
     ]);
 
+    foreach ($members as $member) {
+        CateringMemberPeriod::create([
+            'catering_member_id' => $member->id,
+            'start_date' => '2026-09-01',
+            'end_date' => null,
+        ]);
+    }
+
     // The attendance page initialises the whole month: weekdays "ikut", weekends "libur".
     CateringAttendanceInitializerService::ensureMonth(2026, 10);
 
@@ -194,6 +209,8 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $directLiburRows = 0;
     $directPaymentSections = 0;
     $directConfirmations = 0;
+    $directDueDates = 0;
+    $directOutstandingLabels = 0;
 
     foreach ($members as $member) {
         $invoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
@@ -211,6 +228,13 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
             && str_contains($text, '0813-9994-7699') ? 1 : 0;
         $directConfirmations += ! str_contains($invoice['confirmationReference'], 'INV/')
             && str_contains($text, $invoice['confirmationReference']) ? 1 : 0;
+        $directDueDates += str_contains($text, 'Batas Pembayaran')
+            && str_contains($text, '28 November 2026')
+            && ! str_contains($text, 'Jatuh Tempo')
+            && ! str_contains($text, '28/11/2026') ? 1 : 0;
+        $directOutstandingLabels += str_contains($text, 'TOTAL TUNGGAKAN')
+            && ! str_contains($text, 'TUNGGAKAN SEPTEMBER 2026')
+            && ! str_contains($text, 'BULAN LALU') ? 1 : 0;
 
         $dates = array_column($invoice['attendanceRows'], 'date');
         $printedWeekends += count(array_filter(
@@ -265,6 +289,8 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
     $zipLiburRows = 0;
     $zipPaymentSections = 0;
     $zipConfirmations = 0;
+    $zipDueDates = 0;
+    $zipOutstandingLabels = 0;
 
     for ($index = 0; $index < $archive->numFiles; $index++) {
         $entryName = $archive->getNameIndex($index);
@@ -284,6 +310,13 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         $zipConfirmations += $zipInvoice !== null
             && ! str_contains($zipInvoice['confirmationReference'], 'INV/')
             && str_contains($entryText, $zipInvoice['confirmationReference']) ? 1 : 0;
+        $zipDueDates += str_contains($entryText, 'Batas Pembayaran')
+            && str_contains($entryText, '28 November 2026')
+            && ! str_contains($entryText, 'Jatuh Tempo')
+            && ! str_contains($entryText, '28/11/2026') ? 1 : 0;
+        $zipOutstandingLabels += str_contains($entryText, 'TOTAL TUNGGAKAN')
+            && ! str_contains($entryText, 'TUNGGAKAN SEPTEMBER 2026')
+            && ! str_contains($entryText, 'BULAN LALU') ? 1 : 0;
         $zipReport[] = sprintf('   entry %-48s %8d B', $entryName, $archive->statIndex($index)['size']);
     }
 
@@ -312,11 +345,15 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         ->and($directLiburRows)->toBe(0)
         ->and($directPaymentSections)->toBe(2)
         ->and($directConfirmations)->toBe(2)
+        ->and($directDueDates)->toBe(2)
+        ->and($directOutstandingLabels)->toBe(2)
         ->and($zipUjianRows)->toBe(2)
         ->and($zipBudayaMakanRows)->toBe(2)
         ->and($zipLiburRows)->toBe(0)
         ->and($zipPaymentSections)->toBe(2)
         ->and($zipConfirmations)->toBe(2)
+        ->and($zipDueDates)->toBe(2)
+        ->and($zipOutstandingLabels)->toBe(2)
         ->and($classText)->toContain('PEMBAYARAN')
         ->and($classText)->toContain('KONFIRMASI PEMBAYARAN')
         ->and($classText)->toContain('BUDAYA MAKAN')
@@ -325,6 +362,13 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         ->and($classText)->toContain('5222129702')
         ->and($classText)->toContain('Rara Nurfatimah')
         ->and($classText)->toContain('0813-9994-7699')
+        ->and($classText)->toContain('Batas Pembayaran')
+        ->and($classText)->toContain('28 November 2026')
+        ->and($classText)->not->toContain('Jatuh Tempo')
+        ->and($classText)->not->toContain('28/11/2026')
+        ->and($classText)->toContain('TOTAL TUNGGAKAN')
+        ->and($classText)->not->toContain('TUNGGAKAN SEPTEMBER 2026')
+        ->and($classText)->not->toContain('BULAN LALU')
         ->and($classInvoice['confirmationReference'])->not->toContain('INV/')
         ->and($classText)->toContain($classInvoice['confirmationReference'])
         ->and($classText)->toContain('SUDAH TRANSFER')

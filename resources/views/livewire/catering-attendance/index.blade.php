@@ -394,7 +394,12 @@
                                             x-on:click="openBulkStatusPicker(@js($date['date']), @js($date['day'].' '.$monthOptions[$month].' '.$year), $event)"
                                             x-bind:aria-expanded="bulkDate === @js($date['date'])"
                                             wire:loading.attr="disabled"
-                                            class="mx-auto mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-blue-600 transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                            @disabled(! $date['hasEligibleParticipants'])
+                                            @class([
+                                                'mx-auto mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                                                'text-blue-600 hover:bg-blue-100' => $date['hasEligibleParticipants'],
+                                                'cursor-not-allowed text-slate-300' => ! $date['hasEligibleParticipants'],
+                                            ])
                                             title="Ubah status peserta yang ditampilkan tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
                                             aria-label="Ubah status peserta yang ditampilkan tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
                                             aria-haspopup="menu"
@@ -423,6 +428,7 @@
                                     @foreach ($dates as $date)
                                         @php
                                             $status = $attendance[$participant['id']][$date['date']];
+                                            $isEligible = $attendanceEligibility[$participant['id']][$date['date']] ?? false;
                                         @endphp
                                         <td
                                             wire:key="attendance-cell-{{ $participant['id'] }}-{{ $date['date'] }}"
@@ -432,15 +438,25 @@
                                                 'bg-white' => ! $date['isWeekend'],
                                             ])
                                         >
-                                            <button
-                                                type="button"
-                                                wire:click="openStatusMenu({{ $participant['id'] }}, '{{ $date['date'] }}')"
-                                                class="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 text-xs font-bold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 {{ $statusClasses[$status] ?? 'border-red-700 bg-red-500 text-white' }}"
-                                                title="{{ $participant['name'] }} - {{ $date['date'] }}: {{ $statusLabels[$status] ?? 'Status tidak valid' }}"
-                                                aria-label="Ubah status {{ $participant['name'] }} tanggal {{ $date['day'] }} dari {{ $statusLabels[$status] ?? 'status tidak valid' }}"
-                                            >
-                                                {{ $statusSymbols[$status] ?? '?' }}
-                                            </button>
+                                            @if ($isEligible)
+                                                <button
+                                                    type="button"
+                                                    wire:click="openStatusMenu({{ $participant['id'] }}, '{{ $date['date'] }}')"
+                                                    class="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 text-xs font-bold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 {{ $statusClasses[$status] ?? 'border-red-700 bg-red-500 text-white' }}"
+                                                    title="{{ $participant['name'] }} - {{ $date['date'] }}: {{ $statusLabels[$status] ?? 'Status tidak valid' }}"
+                                                    aria-label="Ubah status {{ $participant['name'] }} tanggal {{ $date['day'] }} dari {{ $statusLabels[$status] ?? 'status tidak valid' }}"
+                                                >
+                                                    {{ $statusSymbols[$status] ?? '?' }}
+                                                </button>
+                                            @else
+                                                <span
+                                                    class="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-400"
+                                                    title="Tanggal di luar periode keikutsertaan {{ $participant['name'] }}"
+                                                    aria-label="{{ $participant['name'] }} tidak terdaftar pada tanggal {{ $date['day'] }} {{ $monthOptions[$month] }} {{ $year }}"
+                                                >
+                                                    &mdash;
+                                                </span>
+                                            @endif
                                         </td>
                                     @endforeach
                                         <td class="sticky right-0 z-10 min-w-32 border-b border-l border-slate-200 bg-white px-3 py-1.5 text-center group-hover:bg-slate-50">

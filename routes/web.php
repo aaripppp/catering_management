@@ -1,8 +1,11 @@
 <?php
 
+use App\Exceptions\CateringUnitInvoiceNotReadyException;
 use App\Http\Controllers\CateringAttendanceRecapPreviewController;
 use App\Http\Controllers\CateringInvoicePreviewController;
 use App\Http\Controllers\CateringMonthlyReportPreviewController;
+use App\Http\Controllers\CateringUnitCombinedInvoiceController;
+use App\Http\Controllers\CateringUnitInvoiceController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
@@ -17,9 +20,18 @@ Route::get('/dashboard', function () {
 Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/school-classes', fn () => view('school-classes.index'))->name('school-classes.index');
     Route::get('/catering-categories', fn () => view('catering-categories.index'))->name('catering-categories.index');
+    Route::get('/catering-employee-units', fn () => view('catering-employee-units.index'))->name('catering-employee-units.index');
+    Route::get('/catering-unit-attendance', fn () => view('catering-unit-attendance.index'))->name('catering-unit-attendance.index');
+    Route::get('/catering-unit-bills', fn () => view('catering-unit-bills.index'))->name('catering-unit-bills.index');
+    Route::get('/catering-unit-bills/invoice/all', CateringUnitCombinedInvoiceController::class)
+        ->name('catering-unit-bills.invoice.all');
+    Route::get('/catering-unit-bills/{bill}/invoice', CateringUnitInvoiceController::class)
+        ->name('catering-unit-bills.invoice')
+        ->missing(fn () => abort(409, CateringUnitInvoiceNotReadyException::MESSAGE));
     Route::get('/catering-members', fn () => view('catering-members.index'))->name('catering-members.index');
     Route::get('/catering-members/import', fn () => view('catering-members.import'))->name('catering-members.import');
     Route::get('/catering-bills', fn () => view('catering-bills.index'))->name('catering-bills.index');
+    Route::get('/budaya-makan', fn () => view('catering-culture-meal.index'))->name('catering-culture-meal.index');
     Route::get('/catering-monthly-report', fn () => view('catering-monthly-report.index'))->name('catering-monthly-report.index');
     Route::get('/catering-monthly-report/preview', CateringMonthlyReportPreviewController::class)
         ->name('catering-monthly-report.preview');

@@ -6,12 +6,12 @@ use App\Enums\CateringAttendanceStatus;
 use App\Enums\CateringEmployeeAssignmentType;
 use App\Enums\CateringParticipantGroup;
 use App\Enums\SchoolLevel;
+use App\Models\CateringAttendance;
 use App\Models\SchoolClass;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 class CateringAttendanceRecapService
 {
@@ -188,7 +188,9 @@ class CateringAttendanceRecapService
     {
         $start = CarbonImmutable::create($filters['year'], $filters['month'], 1)->startOfMonth();
 
-        return DB::table('catering_attendances')
+        return CateringAttendance::query()
+            ->coveredByMembership()
+            ->toBase()
             ->join('catering_members', 'catering_members.id', '=', 'catering_attendances.catering_member_id')
             ->join('catering_categories', 'catering_categories.id', '=', 'catering_members.catering_category_id')
             ->leftJoin('school_classes', 'school_classes.id', '=', 'catering_members.school_class_id')

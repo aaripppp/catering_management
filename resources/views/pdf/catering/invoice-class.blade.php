@@ -7,6 +7,7 @@
     <title>Invoice Catering Kelas {{ $className }}</title>
     <style>
         @page {
+            size: A4 landscape;
             margin: 22px 26px;
         }
 
@@ -106,22 +107,23 @@
         table.detail {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
 
         table.detail th {
             background: #1e40af;
             color: #ffffff;
-            font-size: 8.5px;
+            font-size: 7.5px;
             text-transform: uppercase;
             letter-spacing: 0.4px;
-            padding: 6px 7px;
+            padding: 5px 3px;
             text-align: left;
             border: 1px solid #1e40af;
         }
 
         table.detail td {
             border: 1px solid #e2e8f0;
-            padding: 5px 7px;
+            padding: 4px 3px;
             vertical-align: top;
         }
 
@@ -199,6 +201,24 @@
             font-size: 12px;
             font-weight: bold;
             letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+
+        .payment-due {
+            margin-top: 4px;
+        }
+
+        .payment-due-label {
+            color: #64748b;
+            font-size: 8px;
+        }
+
+        .payment-due-value {
+            color: #0f172a;
+            font-size: 9px;
+            font-weight: bold;
+            margin-top: 1px;
+            white-space: nowrap;
         }
 
         .payment-instruction,
@@ -279,9 +299,13 @@
             <span class="meta-value">{{ $participants }}</span>
         </td>
         <td colspan="2">
-            <span class="meta-label">Total Tagihan</span>
-            <span class="meta-value grand-total">{{ $grandTotalFormatted }}</span>
+            <span class="meta-label">Harus Dibayar</span>
+            <span class="meta-value grand-total">{{ $totalDueFormatted }}</span>
         </td>
+    </tr>
+    <tr>
+        <td colspan="2"><span class="meta-label">Bulan Ini</span><span class="meta-value">{{ $grandTotalFormatted }}</span></td>
+        <td colspan="2"><span class="meta-label">Total Tunggakan</span><span class="meta-value">{{ $totalOutstandingTotalFormatted }}</span></td>
     </tr>
 </table>
 
@@ -291,18 +315,20 @@
     <thead>
         <tr>
             <th class="num" style="width: 3%;">No</th>
-            <th style="width: 18%;">Nama Siswa</th>
-            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
-            <th class="num" style="width: 5%;">Sakit</th>
-            <th class="num" style="width: 5%;">Izin</th>
-            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
-            <th class="num" style="width: 5%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
-            <th class="num" style="width: 5%;">Ujian</th>
-            <th class="num" style="width: 6%;">Event</th>
-            <th class="num" style="width: 5%;">Puasa</th>
-            <th class="num" style="width: 5%;">Libur</th>
-            <th class="right nowrap" style="width: 15%;">Harga / {{ CateringAttendanceStatus::Ikut->label() }}</th>
-            <th class="right nowrap" style="width: 18%;">Total</th>
+            <th style="width: 14%;">Nama Siswa</th>
+            <th class="num" style="width: 4%;">{{ CateringAttendanceStatus::Ikut->label() }}</th>
+            <th class="num" style="width: 4%;">Sakit</th>
+            <th class="num" style="width: 4%;">Izin</th>
+            <th class="num" style="width: 4%;">{{ CateringAttendanceStatus::Alfa->label() }}</th>
+            <th class="num" style="width: 4%;">{{ CateringAttendanceStatus::TidakIkut->label() }}</th>
+            <th class="num" style="width: 4%;">Ujian</th>
+            <th class="num" style="width: 4%;">Event</th>
+            <th class="num" style="width: 4%;">Puasa</th>
+            <th class="num" style="width: 4%;">Libur</th>
+            <th class="right nowrap" style="width: 9%;">Harga / {{ CateringAttendanceStatus::Ikut->label() }}</th>
+            <th class="right nowrap" style="width: 11%;">Tagihan Bulan Ini</th>
+            <th class="right nowrap" style="width: 11%;">Total Tunggakan</th>
+            <th class="right nowrap" style="width: 12%;">Harus Dibayar</th>
         </tr>
     </thead>
     <tbody>
@@ -321,10 +347,12 @@
                 <td class="num">{{ $row['libur'] }}</td>
                 <td class="right nowrap">{{ $row['pricePerDayFormatted'] }}</td>
                 <td class="right nowrap">{{ $row['totalFormatted'] }}</td>
+                <td class="right nowrap">{{ $row['totalOutstandingFormatted'] }}</td>
+                <td class="right nowrap">{{ $row['totalDueFormatted'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="13" class="num">Belum ada peserta aktif pada kelas ini.</td>
+                <td colspan="15" class="num">Belum ada peserta aktif kategori Siswa Umum pada kelas ini.</td>
             </tr>
         @endforelse
     </tbody>
@@ -343,6 +371,8 @@
                 <td class="num">{{ $totalLibur }}</td>
                 <td class="right nowrap">-</td>
                 <td class="right nowrap">{{ $grandTotalFormatted }}</td>
+                <td class="right nowrap">{{ $totalOutstandingTotalFormatted }}</td>
+                <td class="right nowrap">{{ $totalDueFormatted }}</td>
             </tr>
         </tfoot>
     @endif
@@ -361,8 +391,15 @@
             <div class="payment-title">KONFIRMASI PEMBAYARAN</div>
             <div class="payment-instruction">Silakan konfirmasi pembayaran melalui WhatsApp Admin Catering.</div>
             <div class="payment-row"><span class="payment-label">WhatsApp</span><span class="payment-prominent">{{ $payment['admin_whatsapp_display'] }}</span></div>
-            <div class="confirmation-format">Format Konfirmasi:</div>
-            <div class="confirmation-reference">{{ $confirmationReference }}</div>
+            <div class="payment-due">
+                <div class="payment-due-label">Batas Pembayaran</div>
+                <div class="payment-due-value">{{ $dueDateFormatted }}</div>
+            </div>
+            <div class="confirmation-format">Format Konfirmasi: {{ $confirmationFormat }}</div>
+            @if ($confirmationReference)
+                <div class="confirmation-format">Contoh:</div>
+                <div class="confirmation-reference">{{ $confirmationReference }}</div>
+            @endif
         </td>
     </tr>
 </table>

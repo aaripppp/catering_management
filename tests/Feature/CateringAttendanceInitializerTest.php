@@ -4,6 +4,7 @@ use App\Enums\CateringAttendanceStatus;
 use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Services\CateringAttendanceInitializerService;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +40,10 @@ it('initialises one date globally for every active student and employee', functi
         'catering_category_id' => $studentCategory->id,
     ]);
 
+    CateringMemberPeriod::create(['catering_member_id' => $firstStudent->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+    CateringMemberPeriod::create(['catering_member_id' => $secondStudent->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+    CateringMemberPeriod::create(['catering_member_id' => $employee->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+
     CateringAttendanceInitializerService::ensureDate('2026-09-30');
 
     expect(initializerStoredStatus($firstStudent, '2026-09-30'))->toBe(CateringAttendanceStatus::Ikut)
@@ -50,6 +55,7 @@ it('initialises one date globally for every active student and employee', functi
 
 it('uses libur on weekends and ikut on weekdays', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
 
     CateringAttendanceInitializerService::ensureDate('2026-09-05');
     CateringAttendanceInitializerService::ensureDate('2026-09-07');
@@ -73,6 +79,7 @@ it('preserves every existing attendance status', function (CateringAttendanceSta
 
 it('initialises complete calendar months including leap February', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2028-02-01', 'end_date' => null]);
 
     CateringAttendanceInitializerService::ensureMonth(2028, 2);
 
@@ -82,11 +89,13 @@ it('initialises complete calendar months including leap February', function () {
 
 it('is idempotent and fills a new active member on a later run', function () {
     $existingMember = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $existingMember->id, 'start_date' => '2026-09-01', 'end_date' => null]);
 
     CateringAttendanceInitializerService::ensureMonth(2026, 9);
     CateringAttendanceInitializerService::ensureMonth(2026, 9);
 
     $newMember = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $newMember->id, 'start_date' => '2026-09-01', 'end_date' => null]);
     CateringAttendanceInitializerService::ensureMonth(2026, 9);
 
     expect($existingMember->attendances()->count())->toBe(30)
@@ -101,6 +110,9 @@ it('initialises a large month without a query per member or date', function () {
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    foreach (CateringMember::where('school_class_id', $schoolClass->id)->get() as $m) {
+        CateringMemberPeriod::create(['catering_member_id' => $m->id, 'start_date' => '2026-09-01', 'end_date' => null]);
+    }
     $queries = 0;
 
     DB::listen(function () use (&$queries): void {
@@ -109,6 +121,6 @@ it('initialises a large month without a query per member or date', function () {
 
     CateringAttendanceInitializerService::ensureMonth(2026, 9);
 
-    expect($queries)->toBeLessThanOrEqual(4)
+    expect($queries)->toBeLessThanOrEqual(5)
         ->and(CateringAttendance::query()->count())->toBe(900);
 });

@@ -9,6 +9,7 @@ use App\Models\CateringCategory;
 use App\Models\CateringCredit;
 use App\Models\CateringCreditAllocation;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
@@ -34,6 +35,7 @@ function billingParticipant(int $pricePerDay = 20000, string $name = 'Ahmad'): a
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-09-01', 'end_date' => null]);
 
     return compact('member', 'schoolClass', 'category') + ['class' => $schoolClass];
 }
@@ -150,6 +152,7 @@ it('refreshes the category and price snapshots without altering another member b
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $originalCategory->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $otherMember->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     storeBillingAttendance($member, 2026, 10, activeDays: 22);
     storeBillingAttendance($otherMember, 2026, 10, activeDays: 10);
     generateBillingPeriod($schoolClass);
@@ -479,6 +482,7 @@ it('creates missing participant bills on resync without duplicating existing bil
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $secondMember->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     storeBillingAttendance($secondMember, 2026, 10, activeDays: 5);
 
     $result = generateBillingPeriod($schoolClass);
@@ -594,6 +598,9 @@ it('generates many participant snapshots with bounded reads and bulk bill writes
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    foreach ($members as $member) {
+        CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
+    }
 
     foreach ($members as $member) {
         storeBillingAttendance($member, 2026, 10);
@@ -607,5 +614,118 @@ it('generates many participant snapshots with bounded reads and bulk bill writes
     generateBillingPeriod($schoolClass);
 
     expect(CateringBill::query()->count())->toBe(30)
-        ->and($queries)->toBeLessThan(15);
+        ->and($queries)->toBeLessThan(20);
+});
+
+function storeBillingAttendanceOnDays(CateringMember $member, array $days, int $year = 2026, int $month = 10): void
+{
+    CateringAttendance::query()->insert(collect($days)->map(fn (int $day): array => [
+        'catering_member_id' => $member->id,
+        'attendance_date' => CarbonImmutable::create($year, $month, $day)->toDateString(),
+        'status' => CateringAttendanceStatus::Ikut->value,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ])->all());
+}
+
+it('bills only the covered dates when membership starts mid month', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(20000);
+    $member->periods()->update(['start_date' => '2026-10-16']);
+
+    storeBillingAttendanceOnDays($member, range(1, 5));
+    storeBillingAttendanceOnDays($member, range(16, 20));
+
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->saved_days)->toBe(5)
+        ->and($bill->active_days)->toBe(5)
+        ->and($bill->gross_amount)->toBe(100000);
+});
+
+it('bills only the covered dates when membership stops mid month', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(20000);
+    $member->periods()->update(['end_date' => '2026-10-15']);
+
+    storeBillingAttendanceOnDays($member, range(1, 5));
+    storeBillingAttendanceOnDays($member, range(16, 20));
+
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->saved_days)->toBe(5)
+        ->and($bill->active_days)->toBe(5)
+        ->and($bill->gross_amount)->toBe(100000);
+});
+
+it('ignores stored attendance that falls outside the membership period', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(20000);
+    $member->periods()->update(['start_date' => '2026-10-10', 'end_date' => '2026-10-10']);
+
+    storeBillingAttendanceOnDays($member, range(1, 5));
+
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->saved_days)->toBe(0)
+        ->and($bill->active_days)->toBe(0)
+        ->and($bill->gross_amount)->toBe(0);
+});
+
+it('recalculates covered days on resync and preserves the existing payment', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(20000);
+    $member->periods()->update(['end_date' => '2026-10-15']);
+
+    storeBillingAttendanceOnDays($member, range(1, 20));
+
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    app(CateringPaymentService::class)->record($bill, 100000);
+
+    expect($bill->fresh()->saved_days)->toBe(15)
+        ->and($bill->fresh()->active_days)->toBe(15)
+        ->and($bill->fresh()->gross_amount)->toBe(300000);
+
+    $member->periods()->update(['end_date' => null]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+
+    expect($bill->saved_days)->toBe(20)
+        ->and($bill->active_days)->toBe(20)
+        ->and($bill->gross_amount)->toBe(400000)
+        ->and($bill->payments()->count())->toBe(1)
+        ->and((int) $bill->payments()->sum('amount'))->toBe(100000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Partial);
+});
+
+it('resumes billing from the new start date after a membership gap', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(20000);
+    $member->periods()->update([
+        'start_date' => '2026-10-20',
+        'end_date' => '2026-10-25',
+    ]);
+    CateringMemberPeriod::query()->create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-11-17',
+        'end_date' => null,
+    ]);
+    storeBillingAttendanceOnDays($member, range(20, 31));
+    storeBillingAttendanceOnDays($member, range(1, 20), year: 2026, month: 11);
+
+    generateBillingPeriod($schoolClass, year: 2026, month: 10);
+    generateBillingPeriod($schoolClass, year: 2026, month: 11);
+
+    $october = CateringBill::query()->where('period_month', 10)->sole();
+    $november = CateringBill::query()->where('period_month', 11)->sole();
+
+    expect($october->saved_days)->toBe(6)
+        ->and($october->active_days)->toBe(6)
+        ->and($october->gross_amount)->toBe(120000)
+        ->and($november->saved_days)->toBe(4)
+        ->and($november->active_days)->toBe(4)
+        ->and($november->gross_amount)->toBe(80000);
 });

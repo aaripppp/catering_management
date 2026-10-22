@@ -7,6 +7,7 @@ use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,18 @@ function attendanceParticipantSearchStatus(int $memberId, string $date): ?Cateri
         ->get()
         ->first(fn (CateringAttendance $attendance): bool => $attendance->attendance_date->isSameDay($date))
         ?->status;
+}
+
+/**
+ * Give a member an open participation period from the start of September 2026.
+ */
+function giveSearchAttendancePeriod(CateringMember $member, string $start = '2026-09-01'): void
+{
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => $start,
+        'end_date' => null,
+    ]);
 }
 
 it('searches eligible students and employees globally without class filters', function () {
@@ -205,6 +218,8 @@ it('reuses cell autosave bulk date updates statuses and summaries for the select
     $schoolClass = SchoolClass::factory()->create(['name' => '8C', 'level' => '8']);
     $selected = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
     $other = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveSearchAttendancePeriod($selected);
+    giveSearchAttendancePeriod($other);
 
     attendanceParticipantSearchComponent()
         ->call('selectParticipant', $selected->id)
@@ -233,6 +248,8 @@ it('reuses cell autosave bulk date updates statuses and summaries for the select
 it('rejects autosave for a participant outside the selected matrix', function () {
     $selected = CateringMember::factory()->create();
     $outside = CateringMember::factory()->create();
+    giveSearchAttendancePeriod($selected);
+    giveSearchAttendancePeriod($outside);
 
     attendanceParticipantSearchComponent()
         ->call('selectParticipant', $selected->id)
@@ -289,6 +306,7 @@ it('clears selection back to the preserved class matrix', function () {
         'school_class_id' => $otherClass->id,
         'catering_category_id' => $category->id,
     ]);
+    giveSearchAttendancePeriod($classMember);
 
     attendanceParticipantSearchComponent()
         ->call('changeFilter', 'jenjang', 'SMP')
@@ -317,6 +335,7 @@ it('clears selection to guidance when normal filters are incomplete', function (
 it('does not disturb a class matrix when only search text is cleared', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+    giveSearchAttendancePeriod($member);
 
     attendanceParticipantSearchComponent()
         ->call('changeFilter', 'jenjang', 'SMP')
@@ -329,9 +348,11 @@ it('does not disturb a class matrix when only search text is cleared', function 
 
 it('keeps generation global while retaining the selected participant matrix', function () {
     $selected = CateringMember::factory()->create();
+    giveSearchAttendancePeriod($selected);
     $component = attendanceParticipantSearchComponent()
         ->call('selectParticipant', $selected->id);
     $lateParticipant = CateringMember::factory()->create();
+    giveSearchAttendancePeriod($lateParticipant);
 
     $component->call('generateAttendance')
         ->assertSet('selectedParticipantId', $selected->id)

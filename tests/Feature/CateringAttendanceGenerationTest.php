@@ -6,6 +6,7 @@ use App\Livewire\CateringAttendance\Index as CateringAttendanceIndex;
 use App\Models\CateringAttendance;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\SchoolClass;
 use App\Models\User;
 use Livewire\Features\SupportTesting\Testable;
@@ -39,6 +40,10 @@ it('generates the selected month for every active participant', function () {
         'catering_category_id' => $employeeCategory->id,
     ]);
 
+    foreach ([...$students, $employee] as $member) {
+        CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
+    }
+
     $component = attendanceGenerationComponent()
         ->assertSee('Generate Kehadiran')
         ->assertSeeHtml('wire:target="generateAttendance"')
@@ -48,7 +53,6 @@ it('generates the selected month for every active participant', function () {
             type: 'success',
             message: 'Absensi Oktober 2026 berhasil digenerate.',
         );
-
     foreach ([...$students, $employee] as $member) {
         expect($member->attendances()->count())->toBe(31);
     }
@@ -58,6 +62,7 @@ it('generates the selected month for every active participant', function () {
 
 it('uses ikut as the weekday default', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
 
     attendanceGenerationComponent()->call('generateAttendance');
 
@@ -66,6 +71,7 @@ it('uses ikut as the weekday default', function () {
 
 it('uses libur as the weekend default', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
 
     attendanceGenerationComponent()->call('generateAttendance');
 
@@ -75,6 +81,7 @@ it('uses libur as the weekend default', function () {
 
 it('preserves an existing sakit attendance', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     CateringAttendance::factory()->for($member)->create([
         'attendance_date' => '2026-10-05',
         'status' => CateringAttendanceStatus::Sakit,
@@ -88,6 +95,7 @@ it('preserves an existing sakit attendance', function () {
 
 it('preserves an existing izin attendance', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     CateringAttendance::factory()->for($member)->create([
         'attendance_date' => '2026-10-06',
         'status' => CateringAttendanceStatus::Izin,
@@ -101,6 +109,7 @@ it('preserves an existing izin attendance', function () {
 
 it('is idempotent when generation is clicked twice', function () {
     $member = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     $component = attendanceGenerationComponent();
 
     $component->call('generateAttendance');
@@ -123,6 +132,7 @@ it('generates only missing rows for a new participant and refreshes the open mat
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $existingMember->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     $component = Livewire::actingAs(User::factory()->admin()->create())
         ->test(CateringAttendanceIndex::class)
         ->call('changeFilter', 'participantGroup', CateringParticipantGroup::Student->value)
@@ -136,6 +146,7 @@ it('generates only missing rows for a new participant and refreshes the open mat
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
+    CateringMemberPeriod::create(['catering_member_id' => $newMember->id, 'start_date' => '2026-10-01', 'end_date' => null]);
 
     $component->call('generateAttendance')
         ->assertSet('participants', fn (array $participants): bool => array_column($participants, 'name') === ['test', 'test 3']);
@@ -147,6 +158,7 @@ it('generates only missing rows for a new participant and refreshes the open mat
 
 it('does not generate attendance for inactive participants', function () {
     $activeMember = CateringMember::factory()->create();
+    CateringMemberPeriod::create(['catering_member_id' => $activeMember->id, 'start_date' => '2026-10-01', 'end_date' => null]);
     $inactiveMember = CateringMember::factory()->inactive()->create();
 
     attendanceGenerationComponent()->call('generateAttendance');
@@ -171,6 +183,9 @@ it('does not limit generation to the selected class or participant group', funct
     $employee = CateringMember::factory()->withoutClass()->create([
         'catering_category_id' => $employeeCategory->id,
     ]);
+    foreach ([$selectedStudent, $otherStudent, $employee] as $m) {
+        CateringMemberPeriod::create(['catering_member_id' => $m->id, 'start_date' => '2026-10-01', 'end_date' => null]);
+    }
 
     attendanceGenerationComponent()
         ->set('participantGroup', CateringParticipantGroup::Student->value)

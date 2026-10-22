@@ -59,6 +59,15 @@
         </div>
         <p class="mt-3 text-xs text-slate-500">Memperbarui kategori, harga, dan jumlah hari dari data terbaru, lalu menghitung ulang pembayaran serta kredit.</p>
         <div class="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            @can('resetPeriod', App\Models\CateringBill::class)
+                <button type="button" wire:click="confirmResetBills" wire:loading.attr="disabled" wire:target="confirmResetBills" class="inline-flex h-11 w-full min-w-[160px] flex-none items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-300 bg-white px-5 text-sm font-semibold text-red-700 shadow-sm transition hover:border-red-400 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" />
+                    </svg>
+                    <span wire:loading.remove wire:target="confirmResetBills">Reset Tagihan</span>
+                    <span wire:loading wire:target="confirmResetBills">Memeriksa...</span>
+                </button>
+            @endcan
             <button type="button" wire:click="generate" wire:loading.attr="disabled" wire:target="generate" class="inline-flex h-11 w-full min-w-[190px] flex-none items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
                 <span wire:loading.remove wire:target="generate">
                     <span class="inline-flex items-center gap-2">
@@ -311,6 +320,75 @@
                 <div class="flex justify-end gap-2 px-5 py-4">
                     <button type="button" wire:click="closeDeletePaymentModal" class="btn-secondary whitespace-nowrap">Batal</button>
                     <button type="button" wire:click="deletePayment" wire:loading.attr="disabled" wire:target="deletePayment" class="btn-danger whitespace-nowrap">Hapus</button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($showResetBillsModal && $resetBillMonth !== null && $resetBillYear !== null)
+        @php
+            $resetBillCount = (int) ($resetBillSummary['bill_count'] ?? 0);
+            $resetPaymentCount = (int) ($resetBillSummary['payment_count'] ?? 0);
+            $resetCreditCount = (int) ($resetBillSummary['generated_credit_count'] ?? 0);
+            $resetAllocationCount = (int) ($resetBillSummary['allocation_count'] ?? 0);
+            $resetCanProceed = (bool) ($resetBillSummary['can_reset'] ?? false);
+        @endphp
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeResetBillsModal()" class="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="reset-bills-title">
+            <div wire:click="closeResetBillsModal" class="absolute inset-0 bg-slate-950/60 backdrop-blur-[1px]" aria-hidden="true"></div>
+            <div class="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <h3 id="reset-bills-title" class="text-base font-semibold text-slate-900">Reset Tagihan {{ $monthNames[$resetBillMonth] }} {{ $resetBillYear }}?</h3>
+                    @if ($resetBillCount === 0)
+                        <p class="mt-2 text-sm leading-6 text-slate-600">Tidak ada tagihan pada periode ini yang perlu direset.</p>
+                    @elseif (! $resetCanProceed)
+                        <p class="mt-2 text-sm leading-6 text-red-700">Reset tidak dapat dilakukan karena periode ini sudah memiliki transaksi pembayaran atau data finansial terkait.</p>
+                    @else
+                        <p class="mt-2 text-sm leading-6 text-slate-600">Seluruh tagihan pada periode ini akan dihapus. Data absensi tidak akan dihapus.</p>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">Tagihan akan tetap kosong sampai Anda menjalankan Sinkronkan Tagihan kembali.</p>
+                    @endif
+                </div>
+
+                <div class="space-y-4 px-5 py-5 sm:px-6">
+                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Tagihan</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900">{{ number_format($resetBillCount, 0, ',', '.') }}</p>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Absensi</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900">{{ number_format((int) ($resetBillSummary['attendance_count'] ?? 0), 0, ',', '.') }}</p>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Pembayaran</p>
+                            <p class="mt-1 text-lg font-semibold {{ $resetPaymentCount > 0 ? 'text-red-700' : 'text-slate-900' }}">{{ number_format($resetPaymentCount, 0, ',', '.') }}</p>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Kredit / Alokasi</p>
+                            <p class="mt-1 text-lg font-semibold {{ ($resetCreditCount + $resetAllocationCount) > 0 ? 'text-red-700' : 'text-slate-900' }}">{{ number_format($resetCreditCount + $resetAllocationCount, 0, ',', '.') }}</p>
+                        </div>
+                    </div>
+
+                    @if (! $resetCanProceed && $resetBillCount > 0)
+                        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">
+                            @if ($resetPaymentCount > 0)
+                                <p class="font-semibold">Tagihan periode ini sudah memiliki transaksi pembayaran dan tidak dapat direset.</p>
+                                <p class="mt-1">Hapus atau koreksi pembayaran terlebih dahulu sebelum mereset tagihan.</p>
+                            @else
+                                <p class="font-semibold">Tagihan periode ini memiliki kredit atau alokasi terkait dan tidak dapat direset.</p>
+                                <p class="mt-1">Selesaikan data finansial terkait terlebih dahulu sebelum mereset tagihan.</p>
+                            @endif
+                        </div>
+                    @endif
+                </div>
+
+                <div class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-6">
+                    <button type="button" wire:click="closeResetBillsModal" class="btn-secondary whitespace-nowrap">{{ $resetBillCount > 0 && $resetCanProceed ? 'Batal' : 'Tutup' }}</button>
+                    @if ($resetBillCount > 0 && $resetCanProceed)
+                        <button type="button" wire:click="resetBills" wire:loading.attr="disabled" wire:target="resetBills" class="btn-danger whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60">
+                            <span wire:loading.remove wire:target="resetBills">Reset Tagihan</span>
+                            <span wire:loading wire:target="resetBills">Mereset...</span>
+                        </button>
+                    @endif
                 </div>
             </div>
         </div>

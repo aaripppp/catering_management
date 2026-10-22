@@ -2,9 +2,13 @@
 
 use App\Livewire\CateringMembers\Index as CateringMemberIndex;
 use App\Models\CateringAttendance;
+use App\Models\CateringBill;
 use App\Models\CateringCategory;
+use App\Models\CateringCredit;
+use App\Models\CateringCreditAllocation;
 use App\Models\CateringEmployeeAssignment;
 use App\Models\CateringMember;
+use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -174,7 +178,7 @@ it('shows selected count and destructive cleanup warning in the confirmation mod
         ->assertSet('showDeleteModal', true)
         ->assertSet('deletingMemberCount', 3)
         ->assertSee('Hapus 3 Peserta?')
-        ->assertSee('data absensi dan penempatan pegawai terkait')
+        ->assertSee('Data periode keikutsertaan, absensi, penempatan pegawai, tagihan, pembayaran, kredit, dan alokasi kredit terkait')
         ->assertSee('Tindakan ini tidak dapat dibatalkan.');
 });
 
@@ -270,6 +274,69 @@ it('keeps single delete compatible with attendance and employee assignment clean
     expect(CateringMember::query()->whereKey($member->id)->exists())->toBeFalse()
         ->and(CateringAttendance::query()->whereKey($attendance->id)->exists())->toBeFalse()
         ->and(CateringEmployeeAssignment::query()->whereKey($assignment->id)->exists())->toBeFalse();
+});
+
+it('deletes the complete financial graph through the bulk delete action', function () {
+    $member = bulkMember();
+    $bill = CateringBill::factory()->create([
+        'catering_member_id' => $member->id,
+        'member_name' => $member->name,
+    ]);
+    $payment = CateringPayment::factory()->create([
+        'catering_member_id' => $member->id,
+        'catering_bill_id' => $bill->id,
+    ]);
+    $credit = CateringCredit::factory()->create([
+        'catering_member_id' => $member->id,
+        'source_payment_id' => $payment->id,
+        'source_bill_id' => $bill->id,
+    ]);
+    $targetBill = CateringBill::factory()->create([
+        'catering_member_id' => $member->id,
+        'member_name' => $member->name,
+        'period_month' => 11,
+    ]);
+    $allocation = CateringCreditAllocation::factory()->create([
+        'catering_credit_id' => $credit->id,
+        'catering_bill_id' => $targetBill->id,
+    ]);
+
+    bulkMemberComponent()
+        ->set('selectedIds', [(string) $member->id])
+        ->call('confirmBulkDelete')
+        ->call('deleteConfirmed')
+        ->assertHasNoErrors('delete');
+
+    expect(CateringMember::query()->whereKey($member->id)->exists())->toBeFalse()
+        ->and(CateringBill::query()->whereKey([$bill->id, $targetBill->id])->exists())->toBeFalse()
+        ->and(CateringPayment::query()->whereKey($payment->id)->exists())->toBeFalse()
+        ->and(CateringCredit::query()->whereKey($credit->id)->exists())->toBeFalse()
+        ->and(CateringCreditAllocation::query()->whereKey($allocation->id)->exists())->toBeFalse();
+});
+
+it('keeps the delete modal open and reports inconsistent financial ownership', function () {
+    $paymentMember = bulkMember();
+    $billMember = bulkMember();
+    $bill = CateringBill::factory()->create([
+        'catering_member_id' => $billMember->id,
+        'member_name' => $billMember->name,
+    ]);
+    $payment = CateringPayment::factory()->create([
+        'catering_member_id' => $paymentMember->id,
+        'catering_bill_id' => $bill->id,
+    ]);
+
+    bulkMemberComponent()
+        ->set('selectedIds', [(string) $paymentMember->id])
+        ->call('confirmBulkDelete')
+        ->call('deleteConfirmed')
+        ->assertSet('showDeleteModal', true)
+        ->assertHasErrors('delete')
+        ->assertSee('relasi data keuangan yang tidak konsisten');
+
+    expect(CateringMember::query()->whereKey([$paymentMember->id, $billMember->id])->count())->toBe(2)
+        ->and(CateringBill::query()->whereKey($bill->id)->exists())->toBeTrue()
+        ->and(CateringPayment::query()->whereKey($payment->id)->exists())->toBeTrue();
 });
 
 it('uses one set based delete per table for a realistic bulk set', function () {
