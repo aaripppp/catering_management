@@ -156,7 +156,8 @@ it('builds a combined invoice from synchronized unit bill snapshots', function (
             'grossAmount' => 180000,
             'grossAmountFormatted' => 'Rp 180.000',
         ],
-    ])->and($invoice['logoDataUri'])->toStartWith('data:image/png;base64,');
+    ])->and($invoice)->not->toHaveKeys(['priorOutstandingRows', 'totalOutstanding', 'totalDue'])
+        ->and($invoice['logoDataUri'])->toStartWith('data:image/png;base64,');
 });
 
 it('orders combined rows by unit sort_order with a stable fallback', function () {

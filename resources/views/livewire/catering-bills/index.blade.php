@@ -137,7 +137,7 @@
 
     <section class="table-wrap">
         <div class="overflow-x-auto">
-            <table class="table w-full min-w-[1480px]">
+            <table class="table w-full min-w-[1520px]">
                 <thead class="whitespace-nowrap">
                     <tr>
                         <th class="w-10 text-center">No</th>
@@ -151,7 +151,7 @@
                         <th class="text-right">Lebih Bayar</th>
                         <th class="text-right">Sisa</th>
                         <th>Status</th>
-                        <th class="text-right">Aksi</th>
+                        <th class="text-right whitespace-nowrap">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -186,11 +186,30 @@
                                 ])>{{ $bill->payment_status->label() }}</span>
                             </td>
                             <td class="whitespace-nowrap text-right">
-                                <div class="flex justify-end gap-1">
+                                <div class="flex flex-nowrap items-center justify-end gap-1">
                                     @if ($remaining > 0)
-                                        <button type="button" wire:click="openPayment({{ $bill->id }})" class="btn-primary whitespace-nowrap px-3 py-1.5 text-xs">Bayar</button>
+                                        <button type="button" wire:click="openPayment({{ $bill->id }})" class="btn-primary whitespace-nowrap px-2.5 py-1.5 text-xs">Bayar</button>
                                     @endif
-                                    <button type="button" wire:click="openPayment({{ $bill->id }})" class="btn-secondary whitespace-nowrap px-3 py-1.5 text-xs">Riwayat</button>
+                                    <button type="button" wire:click="openPayment({{ $bill->id }})" class="btn-secondary whitespace-nowrap px-2.5 py-1.5 text-xs">Riwayat</button>
+                                    @php
+                                        $member = $bill->member ?? $bill->cateringMember ?? null;
+                                    @endphp
+                                    @if ($member)
+                                        <a
+                                            href="{{ route('catering-attendance.invoice.member', ['member' => $member, 'month' => $bill->period_month, 'year' => $bill->period_year, 'participantGroup' => $bill->participant_group->value, 'schoolClassId' => $bill->school_class_id]) }}"
+                                            target="_blank"
+                                            rel="noopener"
+                                            class="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
+                                            title="Buka invoice {{ $bill->member_name }} di tab baru"
+                                            aria-label="Invoice {{ $bill->member_name }}"
+                                            onclick="event.stopPropagation();"
+                                        >
+                                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                                            </svg>
+                                            Invoice
+                                        </a>
+                                    @endif
                                 </div>
                             </td>
                         </tr>

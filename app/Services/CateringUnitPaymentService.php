@@ -44,7 +44,10 @@ class CateringUnitPaymentService
         return DB::transaction(function () use ($bill, $amount, $actor, $note, $paidAt, $paymentMethod): CateringUnitPayment {
             $lockedBill = CateringUnitBill::query()->lockForUpdate()->findOrFail($bill->id);
 
-            if ($lockedBill->gross_amount === 0) {
+            $net = (int) ($lockedBill->net_amount ?? $lockedBill->gross_amount);
+            $net = $net > 0 ? $net : max(0, (int) $lockedBill->gross_amount - (int) ($lockedBill->total_subsidy_amount ?? 0));
+
+            if ($net === 0) {
                 throw ValidationException::withMessages([
                     'amount' => 'Tagihan unit ini tidak memiliki nilai tagihan.',
                 ]);
@@ -102,7 +105,18 @@ class CateringUnitPaymentService
      */
     public function summaryForBill(CateringUnitBill $bill): array
     {
-        return $this->summarize((int) $bill->gross_amount, $this->paidAmountFor($bill));
+        $attrs = $bill->getAttributes();
+        if (array_key_exists('net_amount', $attrs) && $attrs['net_amount'] !== null) {
+            $billedAmount = (int) $attrs['net_amount'];
+        } else {
+            $billedAmount = (int) ($bill->net_amount ?? 0);
+        }
+
+        if ($billedAmount === 0) {
+            $billedAmount = max(0, (int) $bill->gross_amount - (int) ($bill->total_subsidy_amount ?? 0));
+        }
+
+        return $this->summarize($billedAmount, $this->paidAmountFor($bill));
     }
 
     /**
@@ -131,17 +145,17 @@ class CateringUnitPaymentService
             })
             ->where('catering_unit_bills.period_month', $month)
             ->where('catering_unit_bills.period_year', $year)
-            ->select('catering_unit_bills.gross_amount')
+            ->selectRaw('COALESCE(catering_unit_bills.net_amount, catering_unit_bills.gross_amount) as billed_amount')
             ->selectRaw('COALESCE(payment_totals.paid_amount, 0) as paid_amount');
         $summary = DB::query()
             ->fromSub($periodBills, 'period_bills')
-            ->selectRaw('COALESCE(SUM(gross_amount), 0) as total_billed')
+            ->selectRaw('COALESCE(SUM(billed_amount), 0) as total_billed')
             ->selectRaw('COALESCE(SUM(paid_amount), 0) as total_paid')
-            ->selectRaw('COALESCE(SUM(CASE WHEN gross_amount > paid_amount THEN gross_amount - paid_amount ELSE 0 END), 0) as total_remaining')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > gross_amount THEN paid_amount - gross_amount ELSE 0 END), 0) as total_overpaid')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = gross_amount THEN 1 ELSE 0 END), 0) as paid_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > 0 AND paid_amount < gross_amount THEN 1 ELSE 0 END), 0) as partial_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = 0 AND gross_amount > 0 THEN 1 ELSE 0 END), 0) as unpaid_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN billed_amount > paid_amount THEN billed_amount - paid_amount ELSE 0 END), 0) as total_remaining')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > billed_amount THEN paid_amount - billed_amount ELSE 0 END), 0) as total_overpaid')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = billed_amount THEN 1 ELSE 0 END), 0) as paid_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > 0 AND paid_amount < billed_amount THEN 1 ELSE 0 END), 0) as partial_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = 0 AND billed_amount > 0 THEN 1 ELSE 0 END), 0) as unpaid_count')
             ->first();
 
         return [

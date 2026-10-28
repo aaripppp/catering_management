@@ -5,6 +5,7 @@ use App\Models\CateringEmployeeUnit;
 use App\Models\CateringUnitAttendance;
 use App\Models\CateringUnitBill;
 use App\Models\CateringUnitBillDay;
+use App\Models\CateringUnitPayment;
 use App\Models\User;
 use App\Services\CateringUnitBillingService;
 use Illuminate\Database\QueryException;
@@ -290,4 +291,96 @@ it('synchronizes and evaluates multiple units with bounded queries', function ()
         ->and($statuses->every(fn (array $status): bool => $status['status'] === CateringUnitBillSyncStatus::Synced))->toBeTrue()
         ->and($syncQueryCount)->toBeLessThanOrEqual(12)
         ->and($statusQueryCount)->toBeLessThanOrEqual(4);
+});
+
+it('initializes net amount for newly synchronized unsubsidized bill', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createUnitBillingAttendance($unit, '2026-10-01', 10, 100000);
+
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+
+    expect($bill)->not->toBeNull()
+        ->and((int) $bill->gross_amount)->toBe(1000000)
+        ->and((int) $bill->total_subsidy_amount)->toBe(0)
+        ->and((int) $bill->net_amount)->toBe(1000000);
+});
+
+it('resyncs unsubsidized bill and follows gross after attendance change', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createUnitBillingAttendance($unit, '2026-10-01', 10, 100000);
+
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    expect((int) $bill->net_amount)->toBe(1000000);
+
+    CateringUnitAttendance::query()->where('catering_employee_unit_id', $unit->id)->delete();
+    createUnitBillingAttendance($unit, '2026-10-01', 15, 100000);
+    $resynced = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+
+    expect($resynced)->not->toBeNull()
+        ->and((int) $resynced->gross_amount)->toBe(1500000)
+        ->and((int) $resynced->net_amount)->toBe(1500000);
+});
+
+it('preserves subsidy config on resync and updates employee qty from attendance', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createUnitBillingAttendance($unit, '2026-10-01', 10, 10000);
+
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    app(CateringUnitBillingService::class)->updateSubsidy($bill, [
+        'employee_subsidy_enabled' => true,
+        'employee_subsidy_rate' => 2000,
+        'student_subsidy_enabled' => true,
+        'student_subsidy_qty' => 2,
+        'student_subsidy_rate' => 1000,
+    ]);
+    $bill = $bill->fresh();
+
+    // Change attendance
+    CateringUnitAttendance::query()->where('catering_employee_unit_id', $unit->id)->delete();
+    createUnitBillingAttendance($unit, '2026-10-01', 14, 10000);
+    $resynced = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+
+    expect($resynced)->not->toBeNull()
+        ->and((bool) $resynced->employee_subsidy_enabled)->toBeTrue()
+        ->and((bool) $resynced->student_subsidy_enabled)->toBeTrue()
+        ->and((int) $resynced->employee_subsidy_rate)->toBe(2000)
+        ->and((int) $resynced->student_subsidy_qty)->toBe(2)
+        ->and((int) $resynced->student_subsidy_rate)->toBe(1000)
+        ->and((int) $resynced->employee_subsidy_qty)->toBe(14)
+        ->and((int) $resynced->employee_subsidy_amount)->toBe(28000)
+        ->and((int) $resynced->student_subsidy_amount)->toBe(2000)
+        ->and((int) $resynced->total_subsidy_amount)->toBe(30000)
+        ->and((int) $resynced->gross_amount)->toBe(140000)
+        ->and((int) $resynced->net_amount)->toBe(110000);
+});
+
+it('clamps net to zero when subsidy exceeds gross', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createUnitBillingAttendance($unit, '2026-10-01', 5, 1000);
+
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    app(CateringUnitBillingService::class)->updateSubsidy($bill, [
+        'employee_subsidy_enabled' => true,
+        'employee_subsidy_rate' => 20000,
+        'student_subsidy_enabled' => false,
+    ]);
+
+    expect((int) $bill->fresh()->net_amount)->toBe(0);
+});
+
+it('does not delete existing payments on resync', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createUnitBillingAttendance($unit, '2026-10-01', 10, 10000);
+
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    CateringUnitPayment::factory()->create([
+        'catering_unit_bill_id' => $bill->id,
+        'amount' => 50000,
+    ]);
+
+    CateringUnitAttendance::query()->where('catering_employee_unit_id', $unit->id)->delete();
+    createUnitBillingAttendance($unit, '2026-10-01', 12, 10000);
+    app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+
+    expect(CateringUnitPayment::query()->where('catering_unit_bill_id', $bill->fresh()->id)->count())->toBe(1);
 });

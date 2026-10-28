@@ -44,6 +44,30 @@ class Index extends Component
 
     public ?int $deletingPaymentId = null;
 
+    public bool $showSubsidyModal = false;
+
+    public ?int $subsidyBillId = null;
+
+    public string $subsidyUnitName = '';
+
+    public int $subsidyPeriodMonth = 1;
+
+    public int $subsidyPeriodYear = 2026;
+
+    public int $subsidyGrossAmount = 0;
+
+    public int $subsidyEmployeeQty = 0;
+
+    public bool $subsidyEmployeeEnabled = false;
+
+    public string $subsidyEmployeeRate = '0';
+
+    public bool $subsidyStudentEnabled = false;
+
+    public string $subsidyStudentQty = '0';
+
+    public string $subsidyStudentRate = '0';
+
     public function mount(): void
     {
         Gate::authorize('viewAny', CateringUnitBill::class);
@@ -93,10 +117,98 @@ class Index extends Component
         );
     }
 
-    public function openPayment(int $billId, CateringUnitPaymentService $paymentService): void
+    public function openSubsidy(int $billId): void
+    {
+        Gate::authorize('update', CateringUnitBill::class);
+        $bill = CateringUnitBill::query()->with('unit')->findOrFail($billId);
+        $unit = $bill->unit;
+
+        $this->showSubsidyModal = true;
+        $this->subsidyBillId = $bill->id;
+        $this->subsidyUnitName = $bill->unit_name;
+        $this->subsidyPeriodMonth = (int) $bill->period_month;
+        $this->subsidyPeriodYear = (int) $bill->period_year;
+        $this->subsidyGrossAmount = (int) $bill->gross_amount;
+        $this->subsidyEmployeeQty = (int) $bill->total_quantity;
+        $this->subsidyEmployeeEnabled = (bool) $bill->employee_subsidy_enabled;
+        $this->subsidyEmployeeRate = (string) ($bill->employee_subsidy_rate ?: ($unit?->default_employee_subsidy_rate ?? 0));
+        $this->subsidyStudentEnabled = (bool) $bill->student_subsidy_enabled;
+        $this->subsidyStudentQty = (string) ($bill->student_subsidy_qty ?? 0);
+        $this->subsidyStudentRate = (string) ($bill->student_subsidy_rate ?: ($unit?->default_student_subsidy_rate ?? 0));
+        $this->resetValidation();
+    }
+
+    public function closeSubsidyModal(): void
+    {
+        $this->showSubsidyModal = false;
+        $this->subsidyBillId = null;
+        $this->resetValidation();
+    }
+
+    public function saveSubsidy(CateringUnitBillingService $billingService): void
+    {
+        Gate::authorize('update', CateringUnitBill::class);
+        $bill = CateringUnitBill::query()->findOrFail($this->subsidyBillId);
+
+        $validated = $this->validate([
+            'subsidyEmployeeEnabled' => ['boolean'],
+            'subsidyEmployeeRate' => ['required', 'integer', 'min:0', 'max:999999999'],
+            'subsidyStudentEnabled' => ['boolean'],
+            'subsidyStudentQty' => ['required', 'integer', 'min:0', 'max:999999'],
+            'subsidyStudentRate' => ['required', 'integer', 'min:0', 'max:999999999'],
+        ]);
+
+        try {
+            $billingService->updateSubsidy($bill, [
+                'employee_subsidy_enabled' => (bool) $validated['subsidyEmployeeEnabled'],
+                'employee_subsidy_rate' => (int) $validated['subsidyEmployeeRate'],
+                'student_subsidy_enabled' => (bool) $validated['subsidyStudentEnabled'],
+                'student_subsidy_qty' => (int) $validated['subsidyStudentQty'],
+                'student_subsidy_rate' => (int) $validated['subsidyStudentRate'],
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatch('toast', type: 'danger', message: 'Subsidi gagal disimpan.');
+
+            return;
+        }
+
+        $this->closeSubsidyModal();
+        $this->dispatch('toast', type: 'success', message: 'Subsidi berhasil disimpan.');
+    }
+
+    public function getSubsidyEmployeeAmountProperty(): int
+    {
+        $enabled = (bool) $this->subsidyEmployeeEnabled;
+        $qty = (int) $this->subsidyEmployeeQty;
+        $rate = max(0, (int) $this->subsidyEmployeeRate);
+
+        return $enabled ? ($qty * $rate) : 0;
+    }
+
+    public function getSubsidyStudentAmountProperty(): int
+    {
+        $enabled = (bool) $this->subsidyStudentEnabled;
+        $qty = max(0, (int) $this->subsidyStudentQty);
+        $rate = max(0, (int) $this->subsidyStudentRate);
+
+        return $enabled ? ($qty * $rate) : 0;
+    }
+
+    public function getSubsidyTotalAmountProperty(): int
+    {
+        return $this->subsidyEmployeeAmount + $this->subsidyStudentAmount;
+    }
+
+    public function getSubsidyNetAmountProperty(): int
+    {
+        return max(0, (int) $this->subsidyGrossAmount - $this->subsidyTotalAmount);
+    }
+
+    public function openPayment(int $billId, CateringUnitPaymentService $paymentService, CateringUnitBillingService $billingService): void
     {
         Gate::authorize('create', CateringUnitPayment::class);
-        $bill = CateringUnitBill::query()->findOrFail($billId);
+        $bill = $billingService->ensureNetAmount(CateringUnitBill::query()->findOrFail($billId));
         $summary = $paymentService->summaryForBill($bill);
 
         $this->showPaymentModal = true;
@@ -184,10 +296,10 @@ class Index extends Component
         );
     }
 
-    public function openHistory(int $billId): void
+    public function openHistory(int $billId, CateringUnitBillingService $billingService): void
     {
         Gate::authorize('viewAny', CateringUnitPayment::class);
-        $bill = CateringUnitBill::query()->findOrFail($billId);
+        $bill = $billingService->ensureNetAmount(CateringUnitBill::query()->findOrFail($billId));
 
         $this->showHistoryModal = true;
         $this->historyBillId = $bill->id;

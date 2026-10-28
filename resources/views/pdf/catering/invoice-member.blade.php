@@ -27,7 +27,7 @@
             display: table;
             width: 100%;
             border-bottom: 1.5px solid #1e40af;
-            padding-bottom: 7px;
+            padding-bottom: 5px;
             page-break-inside: avoid;
         }
 
@@ -76,7 +76,7 @@
         .meta {
             display: table;
             width: 100%;
-            margin-top: 8px;
+            margin-top: 6px;
             page-break-inside: avoid;
         }
 
@@ -85,7 +85,7 @@
             width: 50%;
             vertical-align: top;
             border: 1px solid #e2e8f0;
-            padding: 7px 9px;
+            padding: 5px 8px;
         }
 
         .meta-box + .meta-box {
@@ -97,11 +97,11 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: #94a3b8;
-            margin-bottom: 3px;
+            margin-bottom: 2px;
         }
 
         .meta-row {
-            line-height: 1.4;
+            line-height: 1.3;
         }
 
         .meta-key {
@@ -121,7 +121,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: #1e40af;
-            margin: 9px 0 4px;
+            margin: 6px 0 2px;
             page-break-inside: avoid;
         }
 
@@ -141,15 +141,15 @@
             font-size: 8.5px;
             text-transform: uppercase;
             letter-spacing: 0.3px;
-            padding: 4px 5px;
+            padding: 3px 5px;
             text-align: left;
             border: 0.5px solid #1e40af;
         }
 
         table.detail td {
             border: 0.5px solid #e2e8f0;
-            padding: 3.2px 5px;
-            line-height: 1.2;
+            padding: 2.7px 5px;
+            line-height: 1.15;
         }
 
         table.detail tbody tr.alt td {
@@ -198,7 +198,7 @@
         table.summary-grid {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 7px;
+            margin-top: 4px;
             page-break-inside: avoid;
         }
 
@@ -209,12 +209,12 @@
             font-weight: normal;
             text-transform: uppercase;
             letter-spacing: 0.3px;
-            padding: 3.5px 4px;
+            padding: 3px 4px;
             border: 0.5px solid #e2e8f0;
         }
 
         table.summary-grid td {
-            padding: 4px;
+            padding: 3.5px 4px;
             border: 0.5px solid #e2e8f0;
             text-align: center;
             font-size: 11px;
@@ -241,14 +241,14 @@
         table.financial-summary {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 7px;
+            margin-top: 4px;
             page-break-inside: avoid;
         }
 
         table.financial-summary th,
         table.financial-summary td {
             border: 0.5px solid #bfdbfe;
-            padding: 4px 6px;
+            padding: 3px 6px;
             text-align: right;
         }
 
@@ -273,17 +273,44 @@
             font-size: 12px;
         }
 
+        table.outstanding-detail {
+            width: 100%;
+            border-collapse: collapse;
+            page-break-inside: auto;
+        }
+
+        table.outstanding-detail th,
+        table.outstanding-detail td {
+            border: 0.5px solid #bfdbfe;
+            padding: 3px 6px;
+        }
+
+        table.outstanding-detail th {
+            background: #eff6ff;
+            color: #475569;
+            font-size: 8px;
+            text-transform: uppercase;
+            text-align: left;
+        }
+
+        table.outstanding-detail tfoot td {
+            background: #f8fafc;
+            color: #0f172a;
+            font-weight: bold;
+            page-break-inside: avoid;
+        }
+
         table.payment-grid {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 7px;
+            margin-top: 4px;
             page-break-inside: avoid;
         }
 
         table.payment-grid td.payment-card {
             border: 0.5px solid #bfdbfe;
             background: #f8fafc;
-            padding: 5px 7px;
+            padding: 4px 6px;
             vertical-align: top;
         }
 
@@ -296,11 +323,11 @@
             font-size: 8.5px;
             font-weight: bold;
             letter-spacing: 0.45px;
-            margin-bottom: 3px;
+            margin-bottom: 2px;
         }
 
         .payment-row {
-            line-height: 1.35;
+            line-height: 1.25;
         }
 
         .payment-label {
@@ -323,7 +350,7 @@
         }
 
         .payment-due {
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .payment-due-label {
@@ -343,25 +370,25 @@
         .confirmation-format {
             color: #475569;
             font-size: 7.7px;
-            line-height: 1.3;
-            margin-top: 3px;
+            line-height: 1.2;
+            margin-top: 2px;
         }
 
         .confirmation-reference {
             color: #0f172a;
             font-size: 8px;
             font-weight: bold;
-            margin-top: 2px;
+            margin-top: 1px;
         }
 
         .notes {
-            margin-top: 7px;
+            margin-top: 4px;
             border-left: 2px solid #1e40af;
             background: #f8fafc;
-            padding: 6px 9px;
+            padding: 4px 8px;
             color: #475569;
             font-size: 8.5px;
-            line-height: 1.45;
+            line-height: 1.3;
             page-break-inside: avoid;
         }
 
@@ -371,12 +398,12 @@
         }
 
         .footer {
-            margin-top: 7px;
+            margin-top: 3px;
             text-align: center;
-            font-size: 7.5px;
+            font-size: 7.2px;
             color: #94a3b8;
             border-top: 0.5px solid #e2e8f0;
-            padding-top: 4px;
+            padding-top: 2px;
             page-break-inside: avoid;
         }
     </style>
@@ -512,10 +539,37 @@
     </tr>
 </table>
 
+@if ($priorOutstandingRows !== [])
+    <div class="section-title">Tunggakan Sebelumnya</div>
+
+    <table class="outstanding-detail">
+        <thead>
+            <tr>
+                <th>Periode</th>
+                <th class="right">Sisa Tunggakan</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($priorOutstandingRows as $row)
+                <tr>
+                    <td>{{ $row['periodLabel'] }}</td>
+                    <td class="right nowrap">{{ $row['remainingAmountFormatted'] }}</td>
+                </tr>
+            @endforeach
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Total Outstanding</td>
+                <td class="right nowrap">{{ $totalOutstandingFormatted }}</td>
+            </tr>
+        </tfoot>
+    </table>
+@endif
+
 <table class="financial-summary">
     <tr>
         <th style="width: 33.33%;">Tagihan Bulan Ini</th>
-        <th style="width: 33.33%;">Total Tunggakan</th>
+        <th style="width: 33.33%;">Total Outstanding</th>
         <th style="width: 33.34%;">Total Harus Dibayar</th>
     </tr>
     <tr>

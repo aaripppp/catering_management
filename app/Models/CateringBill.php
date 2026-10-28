@@ -75,6 +75,12 @@ class CateringBill extends Model
         return $this->belongsTo(CateringMember::class);
     }
 
+    /** @return BelongsTo<CateringMember, $this> */
+    public function member(): BelongsTo
+    {
+        return $this->belongsTo(CateringMember::class, 'catering_member_id');
+    }
+
     /** @return BelongsTo<SchoolClass, $this> */
     public function schoolClass(): BelongsTo
     {

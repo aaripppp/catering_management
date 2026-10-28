@@ -229,11 +229,15 @@ it('keeps period overpayment separate from another unit outstanding balance', fu
         'period_month' => 10,
         'period_year' => 2026,
         'gross_amount' => 1000,
+        'net_amount' => 1000,
+        'total_subsidy_amount' => 0,
     ]);
     $billB = CateringUnitBill::factory()->create([
         'period_month' => 10,
         'period_year' => 2026,
         'gross_amount' => 1000,
+        'net_amount' => 1000,
+        'total_subsidy_amount' => 0,
     ]);
 
     CateringUnitPayment::factory()->create([
@@ -254,10 +258,10 @@ it('keeps period overpayment separate from another unit outstanding balance', fu
 });
 
 it('aggregates exact unit payment statuses without treating overpayment as paid', function () {
-    $paidBill = CateringUnitBill::factory()->create(['gross_amount' => 1000]);
-    $partialBill = CateringUnitBill::factory()->create(['gross_amount' => 1000]);
-    CateringUnitBill::factory()->create(['gross_amount' => 1000]);
-    $overpaidBill = CateringUnitBill::factory()->create(['gross_amount' => 1000]);
+    $paidBill = CateringUnitBill::factory()->create(['gross_amount' => 1000, 'net_amount' => 1000]);
+    $partialBill = CateringUnitBill::factory()->create(['gross_amount' => 1000, 'net_amount' => 1000]);
+    CateringUnitBill::factory()->create(['gross_amount' => 1000, 'net_amount' => 1000]);
+    $overpaidBill = CateringUnitBill::factory()->create(['gross_amount' => 1000, 'net_amount' => 1000]);
     CateringUnitPayment::factory()->create([
         'catering_unit_bill_id' => $paidBill->id,
         'amount' => 1000,
@@ -285,7 +289,7 @@ it('aggregates exact unit payment statuses without treating overpayment as paid'
 });
 
 it('counts a zero unit bill as paid in period status totals', function () {
-    CateringUnitBill::factory()->create(['gross_amount' => 0]);
+    CateringUnitBill::factory()->create(['gross_amount' => 0, 'net_amount' => 0, 'total_subsidy_amount' => 0]);
 
     $summary = unitPaymentService()->periodSummary(10, 2026);
 
@@ -350,6 +354,7 @@ it('loads the period summary without a query per bill', function () {
         'period_month' => 10,
         'period_year' => 2026,
         'gross_amount' => 100_000,
+        'net_amount' => 100_000,
     ]);
 
     foreach ($bills as $bill) {

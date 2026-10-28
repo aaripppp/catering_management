@@ -4,6 +4,7 @@ use App\Exceptions\CateringUnitInvoiceNotReadyException;
 use App\Models\CateringEmployeeUnit;
 use App\Models\CateringUnitAttendance;
 use App\Models\CateringUnitBill;
+use App\Models\CateringUnitPayment;
 use App\Models\User;
 use App\Services\CateringUnitBillingService;
 use App\Services\CateringUnitInvoiceService;
@@ -79,6 +80,31 @@ function unitInvoicePdfText(string $bytes): string
     return trim((string) preg_replace('/\s+/', ' ', $text));
 }
 
+function createPriorUnitInvoiceBill(
+    CateringEmployeeUnit $unit,
+    int $month,
+    int $year,
+    int $grossAmount,
+): CateringUnitBill {
+    return CateringUnitBill::factory()->create([
+        'catering_employee_unit_id' => $unit->id,
+        'period_month' => $month,
+        'period_year' => $year,
+        'unit_name' => $unit->name,
+        'gross_amount' => $grossAmount,
+        'net_amount' => $grossAmount,
+        'total_subsidy_amount' => 0,
+    ]);
+}
+
+function payPriorUnitInvoiceBill(CateringUnitBill $bill, int $amount): void
+{
+    CateringUnitPayment::factory()->create([
+        'catering_unit_bill_id' => $bill->id,
+        'amount' => $amount,
+    ]);
+}
+
 it('builds a per-unit invoice from synchronized bill snapshots', function () {
     $unit = CateringEmployeeUnit::factory()->create(['name' => 'SD']);
     $bill = createSynchronizedUnitInvoiceBill($unit);
@@ -148,6 +174,117 @@ it('renders a real inline pdf with branding and snapshot totals', function () {
         ->and($text)->toContain('Rp 308.000')
         ->and($text)->toContain('28 November 2026')
         ->and($queryCount)->toBeLessThanOrEqual(10);
+});
+
+it('shows prior unit balances oldest first using each bills remaining amount', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['name' => 'SD']);
+    $augustBill = createPriorUnitInvoiceBill($unit, 8, 2026, 600000);
+    $septemberBill = createPriorUnitInvoiceBill($unit, 9, 2026, 500000);
+    payPriorUnitInvoiceBill($augustBill, 100000);
+    payPriorUnitInvoiceBill($septemberBill, 200000);
+    $currentBill = createSynchronizedUnitInvoiceBill($unit);
+
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($currentBill);
+    $text = unitInvoicePdfText(app(CateringUnitInvoiceService::class)->renderPdf($invoice));
+
+    expect($invoice['priorOutstandingRows'])->toBe([
+        [
+            'month' => 8,
+            'year' => 2026,
+            'periodLabel' => 'Agustus 2026',
+            'remainingAmount' => 500000,
+            'remainingAmountFormatted' => 'Rp 500.000',
+        ],
+        [
+            'month' => 9,
+            'year' => 2026,
+            'periodLabel' => 'September 2026',
+            'remainingAmount' => 300000,
+            'remainingAmountFormatted' => 'Rp 300.000',
+        ],
+    ])->and($invoice['totalOutstanding'])->toBe(800000)
+        ->and($invoice['totalDue'])->toBe(1108000)
+        ->and($text)->toContain('TUNGGAKAN SEBELUMNYA')
+        ->and($text)->toContain('Agustus 2026')
+        ->and($text)->toContain('September 2026')
+        ->and($text)->toContain('Total Outstanding')
+        ->and($text)->toContain('Rp 800.000')
+        ->and($text)->toContain('Rp 1.108.000');
+});
+
+it('excludes paid overpaid zero and current unit bills from prior outstanding', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    $zeroBill = createPriorUnitInvoiceBill($unit, 5, 2026, 0);
+    $paidBill = createPriorUnitInvoiceBill($unit, 6, 2026, 100000);
+    $overpaidBill = createPriorUnitInvoiceBill($unit, 7, 2026, 100000);
+    $partialBill = createPriorUnitInvoiceBill($unit, 9, 2026, 200000);
+    payPriorUnitInvoiceBill($paidBill, 100000);
+    payPriorUnitInvoiceBill($overpaidBill, 125000);
+    payPriorUnitInvoiceBill($partialBill, 50000);
+    $currentBill = createSynchronizedUnitInvoiceBill($unit);
+    payPriorUnitInvoiceBill($currentBill, 100000);
+
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($currentBill);
+
+    expect($zeroBill->gross_amount)->toBe(0)
+        ->and(array_column($invoice['priorOutstandingRows'], 'periodLabel'))->toBe(['September 2026'])
+        ->and(array_column($invoice['priorOutstandingRows'], 'remainingAmount'))->toBe([150000])
+        ->and($invoice['totalOutstanding'])->toBe(150000)
+        ->and($invoice['totalDue'])->toBe(458000);
+});
+
+it('orders prior unit outstanding across a year boundary', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    createPriorUnitInvoiceBill($unit, 11, 2026, 100000);
+    createPriorUnitInvoiceBill($unit, 12, 2026, 200000);
+    $currentBill = createSynchronizedUnitInvoiceBill($unit, month: 1, year: 2027, days: [
+        ['date' => '2027-01-05', 'quantity' => 1, 'price' => 14000],
+    ]);
+
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($currentBill);
+
+    expect(array_column($invoice['priorOutstandingRows'], 'periodLabel'))->toBe([
+        'November 2026',
+        'Desember 2026',
+    ])->and($invoice['totalOutstanding'])->toBe(300000);
+});
+
+it('hides the unit outstanding section when no prior balance exists', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    $bill = createSynchronizedUnitInvoiceBill($unit);
+
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($bill);
+    $html = view('pdf.catering.unit-invoice', $invoice)->render();
+
+    expect($invoice['priorOutstandingRows'])->toBe([])
+        ->and($invoice['totalOutstanding'])->toBe(0)
+        ->and($html)->not->toContain('Tunggakan Sebelumnya')
+        ->and($html)->not->toContain('Total Outstanding');
+});
+
+it('loads unit outstanding in one query regardless of prior period count', function () {
+    $unit = CateringEmployeeUnit::factory()->create();
+    $currentBill = CateringUnitBill::factory()->create([
+        'catering_employee_unit_id' => $unit->id,
+        'period_month' => 1,
+        'period_year' => 2027,
+        'gross_amount' => 1000,
+        'net_amount' => 1000,
+    ]);
+
+    foreach (range(1, 12) as $month) {
+        createPriorUnitInvoiceBill($unit, $month, 2026, 100000);
+    }
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    $breakdown = app(CateringUnitInvoiceService::class)->priorOutstandingBreakdownForBill($currentBill);
+    $queryCount = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect($breakdown['rows'])->toHaveCount(12)
+        ->and($breakdown['total'])->toBe(1200000)
+        ->and($queryCount)->toBe(1);
 });
 
 it('preserves zero-quantity daily snapshots and allows a zero-value invoice', function () {

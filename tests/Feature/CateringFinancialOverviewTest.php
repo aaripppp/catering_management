@@ -467,6 +467,10 @@ it('updates every domain in the overview when the period changes', function () {
         'period_month' => 11,
         'period_year' => 2026,
         'gross_amount' => 3000,
+        'net_amount' => 3000,
+        'total_subsidy_amount' => 0,
+        'employee_subsidy_enabled' => false,
+        'student_subsidy_enabled' => false,
     ]);
     financialOverviewCultureAttendance(1, month: 11);
     app(CateringCultureMealSettingService::class)->updateCultureMealPrice(4000);
@@ -508,7 +512,13 @@ it('loads a large cross-domain overview with a bounded query count', function ()
         ]);
     }
 
-    $unitBills = CateringUnitBill::factory()->count(25)->create(['gross_amount' => 1000]);
+    $unitBills = CateringUnitBill::factory()->count(25)->create([
+        'gross_amount' => 1000,
+        'net_amount' => 1000,
+        'total_subsidy_amount' => 0,
+        'employee_subsidy_enabled' => false,
+        'student_subsidy_enabled' => false,
+    ]);
     foreach ($unitBills as $bill) {
         CateringUnitPayment::factory()->create([
             'catering_unit_bill_id' => $bill->id,

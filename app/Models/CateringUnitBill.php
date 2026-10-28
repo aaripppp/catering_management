@@ -18,6 +18,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'total_quantity',
     'price_per_person_snapshot',
     'gross_amount',
+    'employee_subsidy_enabled',
+    'employee_subsidy_qty',
+    'employee_subsidy_rate',
+    'employee_subsidy_amount',
+    'student_subsidy_enabled',
+    'student_subsidy_qty',
+    'student_subsidy_rate',
+    'student_subsidy_amount',
+    'total_subsidy_amount',
+    'net_amount',
     'generated_at',
 ])]
 class CateringUnitBill extends Model
@@ -34,6 +44,16 @@ class CateringUnitBill extends Model
             'total_quantity' => 'integer',
             'price_per_person_snapshot' => 'integer',
             'gross_amount' => 'integer',
+            'employee_subsidy_enabled' => 'boolean',
+            'employee_subsidy_qty' => 'integer',
+            'employee_subsidy_rate' => 'integer',
+            'employee_subsidy_amount' => 'integer',
+            'student_subsidy_enabled' => 'boolean',
+            'student_subsidy_qty' => 'integer',
+            'student_subsidy_rate' => 'integer',
+            'student_subsidy_amount' => 'integer',
+            'total_subsidy_amount' => 'integer',
+            'net_amount' => 'integer',
             'generated_at' => 'datetime',
         ];
     }

@@ -27,6 +27,16 @@ class CateringUnitBillFactory extends Factory
             'total_quantity' => 20,
             'price_per_person_snapshot' => 13000,
             'gross_amount' => 260000,
+            'employee_subsidy_enabled' => false,
+            'employee_subsidy_qty' => 0,
+            'employee_subsidy_rate' => 0,
+            'employee_subsidy_amount' => 0,
+            'student_subsidy_enabled' => false,
+            'student_subsidy_qty' => 0,
+            'student_subsidy_rate' => 0,
+            'student_subsidy_amount' => 0,
+            'total_subsidy_amount' => 0,
+            'net_amount' => 260000,
             'generated_at' => now(),
         ];
     }

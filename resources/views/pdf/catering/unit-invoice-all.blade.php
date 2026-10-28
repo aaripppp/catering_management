@@ -31,11 +31,11 @@
         .right { text-align: right; }
         .center { text-align: center; }
         .nowrap { white-space: nowrap; }
-        .summary { margin-top: 10px; width: 45%; margin-left: auto; page-break-inside: avoid; }
-        .summary td { padding: 7px 9px; }
-        .summary .label { width: 60%; color: #475569; text-align: right; }
-        .summary .value { width: 40%; color: #0f172a; font-weight: bold; text-align: right; white-space: nowrap; }
-        .summary .grand td { border-color: #1e40af; background: #1e40af; color: #fff; font-size: 12px; }
+        .summary { margin-top: 10px; width: 48%; margin-left: auto; page-break-inside: avoid; }
+        .summary td { padding: 6px 8px; }
+        .summary .label { width: 58%; color: #475569; text-align: right; }
+        .summary .value { width: 42%; color: #0f172a; font-weight: bold; text-align: right; white-space: nowrap; }
+        .summary .grand td { border-color: #1e40af; background: #1e40af; color: #fff; font-size: 11px; }
         .payment { margin-top: 12px; padding: 9px 11px; border: .5px solid #bfdbfe; background: #f8fafc; page-break-inside: avoid; }
         .payment-title { margin-bottom: 4px; color: #1e40af; font-size: 9px; font-weight: bold; }
         .payment-row { line-height: 1.5; }
@@ -78,31 +78,56 @@
     <table>
         <thead>
             <tr>
-                <th class="center" style="width: 6%;">No</th>
-                <th style="width: 44%;">Unit</th>
-                <th class="right" style="width: 14%;">Total Qty</th>
-                <th class="right nowrap" style="width: 16%;">Harga/Porsi</th>
-                <th class="right nowrap" style="width: 20%;">Total Tagihan</th>
+                <th class="center" style="width: 5%;">No</th>
+                <th style="width: 36%;">Unit</th>
+                <th class="right" style="width: 10%;">Total Qty</th>
+                <th class="right nowrap" style="width: 14%;">Harga/Porsi</th>
+                <th class="right nowrap" style="width: 12%;">Kotor</th>
+                <th class="right nowrap" style="width: 11%;">Subsidi</th>
+                <th class="right nowrap" style="width: 12%;">Tagihan Bersih</th>
             </tr>
         </thead>
         <tbody>
-            @forelse ($rows as $row)
+            @if (empty($rows))
                 <tr>
-                    <td class="center">{{ $row['no'] }}</td>
-                    <td>{{ $row['unitName'] }}</td>
-                    <td class="right">{{ $row['totalQuantityFormatted'] }}</td>
-                    <td class="right nowrap">{{ $row['priceLabel'] }}</td>
-                    <td class="right nowrap">{{ $row['grossAmountFormatted'] }}</td>
+                    <td colspan="7" class="center">Tidak ada tagihan unit tersinkron untuk periode ini.</td>
                 </tr>
-            @empty
-                <tr><td colspan="5" class="center">Tidak ada tagihan unit tersinkron untuk periode ini.</td></tr>
-            @endforelse
+            @else
+                @foreach ($rows as $row)
+                    <tr>
+                        <td class="center">{{ $row['no'] }}</td>
+                        <td>{{ $row['unitName'] }}</td>
+                        <td class="right">{{ $row['totalQuantityFormatted'] }}</td>
+                        <td class="right nowrap">{{ $row['priceLabel'] }}</td>
+                        <td class="right nowrap">{{ $row['grossAmountFormatted'] }}</td>
+                        <td class="right nowrap">
+                            @if (($row['totalSubsidyAmount'] ?? 0) > 0)
+                                - {{ $row['totalSubsidyAmountFormatted'] }}
+                            @else
+                                Rp 0
+                            @endif
+                        </td>
+                        <td class="right nowrap">{{ $row['netAmountFormatted'] ?? $row['grossAmountFormatted'] }}</td>
+                    </tr>
+                @endforeach
+            @endif
         </tbody>
     </table>
 
     <table class="summary">
         <tr><td class="label">Total Quantity</td><td class="value">{{ $grandTotalQuantityFormatted }}</td></tr>
-        <tr class="grand"><td class="label">Total Tagihan</td><td class="value">{{ $grandTotalAmountFormatted }}</td></tr>
+        <tr><td class="label">Total Tagihan Kotor</td><td class="value">{{ $grandTotalGrossFormatted ?? $grandTotalAmountFormatted }}</td></tr>
+        <tr>
+            <td class="label">Total Subsidi</td>
+            <td class="value">
+                @if (($grandTotalSubsidy ?? 0) > 0)
+                    - {{ $grandTotalSubsidyFormatted ?? 'Rp 0' }}
+                @else
+                    Rp 0
+                @endif
+            </td>
+        </tr>
+        <tr class="grand"><td class="label">Total Tagihan Bersih</td><td class="value">{{ $grandTotalNetFormatted ?? $grandTotalAmountFormatted }}</td></tr>
     </table>
 
     <div class="payment">

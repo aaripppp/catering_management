@@ -61,7 +61,7 @@ class CateringInvoiceService
         CarbonImmutable $end,
     ): array {
         $rowsByMember = $this->attendanceRowsForMembers([$member->id], $start, $end);
-        [$currentBills, $outstandingByMember] = $this->billsForMembers([$member->id], $start);
+        [$currentBills, $outstandingByMember, $breakdownsByMember] = $this->billsForMembers([$member->id], $start);
 
         return $this->composeInvoice(
             $member,
@@ -69,7 +69,7 @@ class CateringInvoiceService
             $start,
             $end,
             $currentBills->get($member->id),
-            $outstandingByMember->get($member->id, 0),
+            $breakdownsByMember->get($member->id, $this->emptyOutstandingBreakdown()),
         );
     }
 
@@ -193,6 +193,11 @@ class CateringInvoiceService
             'totalOutstandingTotalFormatted' => $this->formatRupiah($totalOutstandingTotal),
             'totalDue' => $totalDue,
             'totalDueFormatted' => $this->formatRupiah($totalDue),
+            'outstandingExplanation' => sprintf(
+                'Tunggakan bulan lalu merupakan sisa tagihan dari periode sebelum %s %d yang belum dilunasi.',
+                self::MONTH_NAMES[$start->month],
+                $start->year,
+            ),
             'totalIkut' => $totals[self::BILLABLE_STATUS->value],
             'totalSakit' => $totals[CateringAttendanceStatus::Sakit->value],
             'totalIzin' => $totals[CateringAttendanceStatus::Izin->value],
@@ -245,7 +250,7 @@ class CateringInvoiceService
             $start,
             $end,
         );
-        [$currentBills, $outstandingByMember] = $this->billsForMembers($members->pluck('id')->all(), $start);
+        [$currentBills, $outstandingByMember, $breakdownsByMember] = $this->billsForMembers($members->pluck('id')->all(), $start);
 
         return $members
             ->map(fn (CateringMember $member): array => $this->composeInvoice(
@@ -254,7 +259,7 @@ class CateringInvoiceService
                 start: $start,
                 end: $end,
                 bill: $currentBills->get($member->id),
-                totalOutstanding: $outstandingByMember->get($member->id, 0),
+                outstandingBreakdown: $breakdownsByMember->get($member->id, $this->emptyOutstandingBreakdown()),
             ))
             ->values()
             ->all();
@@ -486,7 +491,7 @@ class CateringInvoiceService
         CarbonImmutable $start,
         CarbonImmutable $end,
         ?CateringBill $bill = null,
-        int $totalOutstanding = 0,
+        array $outstandingBreakdown = ['rows' => [], 'total' => 0],
     ): array {
         $category = $member->relationLoaded('cateringCategory')
             ? $member->cateringCategory
@@ -503,6 +508,7 @@ class CateringInvoiceService
         $className = $usesClass ? ($member->schoolClass?->name ?? '-') : $group->label();
         $isEmployee = $group === CateringParticipantGroup::Employee;
         $total = $bill?->gross_amount ?? ($quantity * $pricePerDay);
+        $totalOutstanding = $outstandingBreakdown['total'];
         $totalDue = $total + $totalOutstanding;
         $invoiceNumber = sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id);
         $invoiceDate = $this->invoiceDate($start);
@@ -539,6 +545,7 @@ class CateringInvoiceService
             'totalFormatted' => $this->formatRupiah($total),
             'totalOutstanding' => $totalOutstanding,
             'totalOutstandingFormatted' => $this->formatRupiah($totalOutstanding),
+            'priorOutstandingRows' => $outstandingBreakdown['rows'],
             'totalDue' => $totalDue,
             'totalDueFormatted' => $this->formatRupiah($totalDue),
             'paymentStatusLabel' => $bill?->payment_status->label(),
@@ -588,12 +595,12 @@ class CateringInvoiceService
      * Load current and all prior bills, including financial aggregates, in one query.
      *
      * @param  array<int, int>  $memberIds
-     * @return array{0: Collection<int, CateringBill>, 1: Collection<int, int>}
+     * @return array{0: Collection<int, CateringBill>, 1: Collection<int, int>, 2: Collection<int, array{rows: array<int, array{month: int, year: int, periodLabel: string, remainingAmount: int, remainingAmountFormatted: string}>, total: int}>}
      */
     private function billsForMembers(array $memberIds, CarbonImmutable $start): array
     {
         if ($memberIds === []) {
-            return [collect(), collect()];
+            return [collect(), collect(), collect()];
         }
 
         $bills = CateringBill::query()
@@ -607,21 +614,60 @@ class CateringInvoiceService
             })
             ->withSum('payments as paid_amount', 'amount')
             ->withSum('creditAllocations as credit_applied_amount', 'amount')
+            ->orderBy('period_year')
+            ->orderBy('period_month')
+            ->orderBy('id')
             ->get();
 
         $currentBills = $bills
             ->where('period_month', $start->month)
             ->where('period_year', $start->year)
             ->keyBy('catering_member_id');
-        $outstandingByMember = $bills
+        $breakdownsByMember = $bills
             ->reject(fn (CateringBill $bill): bool => $bill->period_month === $start->month
                 && $bill->period_year === $start->year)
             ->groupBy('catering_member_id')
-            ->map(fn (Collection $bills): int => $bills->sum(
-                fn (CateringBill $bill): int => $bill->remainingAmount(),
-            ));
+            ->map(fn (Collection $bills): array => $this->outstandingBreakdownForBills($bills));
+        $outstandingByMember = $breakdownsByMember
+            ->map(fn (array $breakdown): int => $breakdown['total']);
 
-        return [$currentBills, $outstandingByMember];
+        return [$currentBills, $outstandingByMember, $breakdownsByMember];
+    }
+
+    /**
+     * @param  Collection<int, CateringBill>  $bills
+     * @return array{rows: array<int, array{month: int, year: int, periodLabel: string, remainingAmount: int, remainingAmountFormatted: string}>, total: int}
+     */
+    private function outstandingBreakdownForBills(Collection $bills): array
+    {
+        $rows = $bills
+            ->map(function (CateringBill $bill): array {
+                $remainingAmount = $bill->remainingAmount();
+
+                return [
+                    'month' => $bill->period_month,
+                    'year' => $bill->period_year,
+                    'periodLabel' => self::MONTH_NAMES[$bill->period_month].' '.$bill->period_year,
+                    'remainingAmount' => $remainingAmount,
+                    'remainingAmountFormatted' => $this->formatRupiah($remainingAmount),
+                ];
+            })
+            ->filter(fn (array $row): bool => $row['remainingAmount'] > 0)
+            ->values()
+            ->all();
+
+        return [
+            'rows' => $rows,
+            'total' => array_sum(array_column($rows, 'remainingAmount')),
+        ];
+    }
+
+    /**
+     * @return array{rows: array<int, array{month: int, year: int, periodLabel: string, remainingAmount: int, remainingAmountFormatted: string}>, total: int}
+     */
+    private function emptyOutstandingBreakdown(): array
+    {
+        return ['rows' => [], 'total' => 0];
     }
 
     private function invoiceDate(CarbonImmutable $start): CarbonImmutable

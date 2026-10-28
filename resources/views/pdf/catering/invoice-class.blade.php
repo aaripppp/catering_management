@@ -95,6 +95,12 @@
             color: #0f172a;
         }
 
+        .outstanding-note {
+            color: #475569;
+            font-size: 8.5px;
+            line-height: 1.35;
+        }
+
         .section-title {
             font-size: 10px;
             font-weight: bold;
@@ -298,14 +304,15 @@
             <span class="meta-label">Jumlah Peserta</span>
             <span class="meta-value">{{ $participants }}</span>
         </td>
-        <td colspan="2">
-            <span class="meta-label">Harus Dibayar</span>
-            <span class="meta-value grand-total">{{ $totalDueFormatted }}</span>
-        </td>
+        <td colspan="2"></td>
     </tr>
     <tr>
-        <td colspan="2"><span class="meta-label">Bulan Ini</span><span class="meta-value">{{ $grandTotalFormatted }}</span></td>
-        <td colspan="2"><span class="meta-label">Total Tunggakan</span><span class="meta-value">{{ $totalOutstandingTotalFormatted }}</span></td>
+        <td><span class="meta-label">Tagihan Bulan Ini</span><span class="meta-value">{{ $grandTotalFormatted }}</span></td>
+        <td><span class="meta-label">Tunggakan Bulan Lalu</span><span class="meta-value">{{ $totalOutstandingTotalFormatted }}</span></td>
+        <td colspan="2"><span class="meta-label">Total Harus Dibayar</span><span class="meta-value grand-total">{{ $totalDueFormatted }}</span></td>
+    </tr>
+    <tr>
+        <td colspan="4" class="outstanding-note">{{ $outstandingExplanation }}</td>
     </tr>
 </table>
 
@@ -326,9 +333,7 @@
             <th class="num" style="width: 4%;">Puasa</th>
             <th class="num" style="width: 4%;">Libur</th>
             <th class="right nowrap" style="width: 9%;">Harga / {{ CateringAttendanceStatus::Ikut->label() }}</th>
-            <th class="right nowrap" style="width: 11%;">Tagihan Bulan Ini</th>
-            <th class="right nowrap" style="width: 11%;">Total Tunggakan</th>
-            <th class="right nowrap" style="width: 12%;">Harus Dibayar</th>
+            <th class="right nowrap" style="width: 20%;">Tagihan Bulan Ini</th>
         </tr>
     </thead>
     <tbody>
@@ -347,12 +352,10 @@
                 <td class="num">{{ $row['libur'] }}</td>
                 <td class="right nowrap">{{ $row['pricePerDayFormatted'] }}</td>
                 <td class="right nowrap">{{ $row['totalFormatted'] }}</td>
-                <td class="right nowrap">{{ $row['totalOutstandingFormatted'] }}</td>
-                <td class="right nowrap">{{ $row['totalDueFormatted'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="15" class="num">Belum ada peserta aktif kategori Siswa Umum pada kelas ini.</td>
+                <td colspan="13" class="num">Belum ada peserta aktif kategori Siswa Umum pada kelas ini.</td>
             </tr>
         @endforelse
     </tbody>
@@ -371,8 +374,6 @@
                 <td class="num">{{ $totalLibur }}</td>
                 <td class="right nowrap">-</td>
                 <td class="right nowrap">{{ $grandTotalFormatted }}</td>
-                <td class="right nowrap">{{ $totalOutstandingTotalFormatted }}</td>
-                <td class="right nowrap">{{ $totalDueFormatted }}</td>
             </tr>
         </tfoot>
     @endif

@@ -36,6 +36,8 @@
         .summary .label { width: 70%; color: #475569; text-align: right; }
         .summary .value { width: 30%; color: #0f172a; font-weight: bold; text-align: right; white-space: nowrap; }
         .summary .grand td { border-color: #1e40af; background: #1e40af; color: #fff; font-size: 12px; }
+        .outstanding { page-break-inside: auto; }
+        .outstanding tfoot td { background: #f8fafc; font-weight: bold; page-break-inside: avoid; }
         .payment { margin-top: 12px; padding: 9px 11px; border: .5px solid #bfdbfe; background: #f8fafc; page-break-inside: avoid; }
         .payment-title { margin-bottom: 4px; color: #1e40af; font-size: 9px; font-weight: bold; }
         .payment-row { line-height: 1.5; }
@@ -105,8 +107,50 @@
     <table class="summary">
         <tr><td class="label">Total Quantity</td><td class="value">{{ number_format($totalQuantity, 0, ',', '.') }}</td></tr>
         <tr><td class="label">Harga/Porsi</td><td class="value">{{ $priceLabel }}</td></tr>
-        <tr class="grand"><td class="label">Total Tagihan</td><td class="value">{{ $grossAmountFormatted }}</td></tr>
+        <tr><td class="label">Tagihan Kotor</td><td class="value">{{ $grossAmountFormatted }}</td></tr>
+        @if (($totalSubsidyAmount ?? 0) > 0)
+            @if (($employeeSubsidyAmount ?? 0) > 0)
+                <tr><td class="label">Subsidi Pegawai</td><td class="value">- {{ $employeeSubsidyAmountFormatted ?? number_format($employeeSubsidyAmount, 0, ',', '.') }}</td></tr>
+            @endif
+            @if (($studentSubsidyAmount ?? 0) > 0)
+                <tr><td class="label">Subsidi Siswa</td><td class="value">- {{ $studentSubsidyAmountFormatted ?? number_format($studentSubsidyAmount, 0, ',', '.') }}</td></tr>
+            @endif
+            <tr><td class="label">Total Tagihan</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+        @else
+            <tr class="grand"><td class="label">Tagihan Bulan Ini</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+        @endif
     </table>
+
+    @if ($priorOutstandingRows !== [])
+        <div class="section-title">Tunggakan Sebelumnya</div>
+        <table class="outstanding">
+            <thead>
+                <tr>
+                    <th>Periode</th>
+                    <th class="right">Sisa Tunggakan</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($priorOutstandingRows as $row)
+                    <tr>
+                        <td>{{ $row['periodLabel'] }}</td>
+                        <td class="right nowrap">{{ $row['remainingAmountFormatted'] }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Total Outstanding</td>
+                    <td class="right nowrap">{{ $totalOutstandingFormatted }}</td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <table class="summary">
+            <tr><td class="label">Total Tagihan Periode Ini</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+            <tr class="grand"><td class="label">Total Harus Dibayar</td><td class="value">{{ $totalDueFormatted }}</td></tr>
+        </table>
+    @endif
 
     <div class="payment">
         <div class="payment-title">INFORMASI PEMBAYARAN</div>

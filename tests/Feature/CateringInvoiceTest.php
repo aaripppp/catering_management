@@ -664,6 +664,7 @@ it('does not introduce an n+1 pattern when building bulk invoices', function () 
 
     foreach ($members as $member) {
         saveSeptemberAttendance($member, ikut: 3);
+        $member->periods()->update(['start_date' => '2026-03-01']);
 
         foreach (range(3, 8) as $month) {
             createInvoiceBill($member, 2026, $month, 100000);
@@ -1048,6 +1049,7 @@ it('adds all prior outstanding balances without subtracting current payments', f
     [$start, $end] = saveMonthAttendance($member, 2026, 10, 22, [
         [CateringAttendanceStatus::Ikut, 22],
     ]);
+    $member->periods()->update(['start_date' => '2026-08-01']);
     $augustBill = createInvoiceBill($member, 2026, 8, 352000);
     $septemberBill = createInvoiceBill($member, 2026, 9, 352000);
     $currentBill = createInvoiceBill($member, 2026, 10, 352000, [
@@ -1083,11 +1085,28 @@ it('adds all prior outstanding balances without subtracting current payments', f
         ->and($invoice['total'])->toBe(352000)
         ->and($invoice['paidAmount'])->toBe(100000)
         ->and($invoice['remainingAmount'])->toBe(252000)
+        ->and($invoice['priorOutstandingRows'])->toBe([
+            [
+                'month' => 8,
+                'year' => 2026,
+                'periodLabel' => 'Agustus 2026',
+                'remainingAmount' => 152000,
+                'remainingAmountFormatted' => 'Rp 152.000',
+            ],
+            [
+                'month' => 9,
+                'year' => 2026,
+                'periodLabel' => 'September 2026',
+                'remainingAmount' => 302000,
+                'remainingAmountFormatted' => 'Rp 302.000',
+            ],
+        ])
         ->and($invoice['totalOutstanding'])->toBe(454000)
         ->and($invoice['totalDue'])->toBe(806000)
-        ->and($text)->toContain('TOTAL TUNGGAKAN')
-        ->and($text)->not->toContain('TUNGGAKAN SEPTEMBER 2026')
-        ->and($text)->not->toContain('BULAN LALU')
+        ->and($text)->toContain('TUNGGAKAN SEBELUMNYA')
+        ->and($text)->toContain('Agustus 2026')
+        ->and($text)->toContain('September 2026')
+        ->and($text)->toContain('TOTAL OUTSTANDING')
         ->and($text)->toContain('TOTAL HARUS DIBAYAR')
         ->and($text)->toContain('Rp 454.000')
         ->and($text)->toContain('Rp 806.000');
@@ -1106,9 +1125,12 @@ it('shows zero cumulative outstanding when no prior bills exist', function () {
         $member->fresh(['cateringCategory', 'schoolClass']),
         ...invoicePeriod(),
     );
+    $html = view('pdf.catering.invoice-member', $invoice)->render();
 
     expect($invoice['totalOutstanding'])->toBe(0)
-        ->and($invoice['totalDue'])->toBe(30000);
+        ->and($invoice['priorOutstandingRows'])->toBe([])
+        ->and($invoice['totalDue'])->toBe(30000)
+        ->and($html)->not->toContain('Tunggakan Sebelumnya');
 });
 
 it('uses reconciled credit once when summing historical outstanding', function () {
@@ -1121,6 +1143,7 @@ it('uses reconciled credit once when summing historical outstanding', function (
     [$start, $end] = saveMonthAttendance($member, 2026, 10, 2, [
         [CateringAttendanceStatus::Ikut, 2],
     ]);
+    $member->periods()->update(['start_date' => '2026-07-01']);
     $julyBill = createInvoiceBill($member, 2026, 7, 100000);
     $augustBill = createInvoiceBill($member, 2026, 8, 352000);
     $septemberBill = createInvoiceBill($member, 2026, 9, 352000);
@@ -1139,6 +1162,15 @@ it('uses reconciled credit once when summing historical outstanding', function (
         ->and($augustBill->fresh()->remainingAmount())->toBe(0)
         ->and($septemberBill->fresh()->creditAppliedAmount())->toBe(100000)
         ->and($septemberBill->fresh()->remainingAmount())->toBe(202000)
+        ->and($invoice['priorOutstandingRows'])->toBe([
+            [
+                'month' => 9,
+                'year' => 2026,
+                'periodLabel' => 'September 2026',
+                'remainingAmount' => 202000,
+                'remainingAmountFormatted' => 'Rp 202.000',
+            ],
+        ])
         ->and($invoice['total'])->toBe(32000)
         ->and($invoice['totalOutstanding'])->toBe(202000)
         ->and($invoice['totalDue'])->toBe(234000);
@@ -1154,6 +1186,8 @@ it('includes December outstanding in a January invoice', function () {
     [$start, $end] = saveMonthAttendance($member, 2027, 1, 2, [
         [CateringAttendanceStatus::Ikut, 2],
     ]);
+    $member->periods()->update(['start_date' => '2026-11-01']);
+    createInvoiceBill($member, 2026, 11, 50000);
     $decemberBill = createInvoiceBill($member, 2026, 12, 100000);
     CateringPayment::factory()->create([
         'catering_bill_id' => $decemberBill->id,
@@ -1168,8 +1202,13 @@ it('includes December outstanding in a January invoice', function () {
     );
 
     expect($invoice['total'])->toBe(30000)
-        ->and($invoice['totalOutstanding'])->toBe(75000)
-        ->and($invoice['totalDue'])->toBe(105000);
+        ->and(array_column($invoice['priorOutstandingRows'], 'periodLabel'))->toBe([
+            'November 2026',
+            'Desember 2026',
+        ])
+        ->and(array_column($invoice['priorOutstandingRows'], 'remainingAmount'))->toBe([50000, 75000])
+        ->and($invoice['totalOutstanding'])->toBe(125000)
+        ->and($invoice['totalDue'])->toBe(155000);
 });
 
 it('lists every non-libur attendance date in the individual invoice detail table', function () {
@@ -1651,6 +1690,7 @@ it('adds cumulative participant debt to class rows and aggregates', function () 
     ]);
     saveSeptemberAttendance($member, ikut: 4);
     saveSeptemberAttendance($excluded, ikut: 5);
+    $member->periods()->update(['start_date' => '2026-05-01']);
     $fullyPaidBill = createInvoiceBill($member, 2026, 5, 100000);
     $overpaidBill = createInvoiceBill($member, 2026, 6, 100000);
     $julyBill = createInvoiceBill($member, 2026, 7, 100000, [
@@ -1691,9 +1731,12 @@ it('adds cumulative participant debt to class rows and aggregates', function () 
         ->and($invoice['rows'][0]['totalOutstanding'])->toBe(225000)
         ->and($invoice['rows'][0]['totalDue'])->toBe(285000)
         ->and(array_column($invoice['rows'], 'memberName'))->toBe(['Ahmad Zaki'])
-        ->and($text)->toContain('TOTAL TUNGGAKAN')
-        ->and($text)->not->toContain('BULAN LALU')
-        ->and($text)->toContain('HARUS DIBAYAR')
+        ->and($text)->toContain('Tunggakan Bulan Lalu')
+        ->and($text)->toContain('Tagihan Bulan Ini')
+        ->and($text)->toContain('Total Harus Dibayar')
+        ->and($text)->toContain('Tunggakan bulan lalu merupakan sisa tagihan dari periode sebelum September 2026 yang belum dilunasi.')
+        ->and($text)->not->toContain('JULI 2026')
+        ->and($text)->not->toContain('AGUSTUS 2026')
         ->and($text)->toContain('Rp 225.000')
         ->and($text)->toContain('Rp 285.000')
         ->and($text)->not->toContain('Budi Kategori Lain');
@@ -1912,6 +1955,65 @@ it('fits a 31 day individual invoice on a single a4 page', function () {
     expect(count($invoice['attendanceRows']))->toBe(22);
 
     expect(invoicePdfPageCount(invoiceService()->renderPdf($invoice)))->toBe(1);
+});
+
+it('fits a 22 row invoice with prior outstanding and footer on one a4 page', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->create(['price_per_day' => 15000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    [$start, $end] = saveMonthAttendance($member, 2026, 10, 31, [
+        [CateringAttendanceStatus::Ikut, 22],
+    ]);
+    $member->periods()->update(['start_date' => '2026-09-01']);
+    $priorBill = createInvoiceBill($member, 2026, 9, 200000);
+    CateringPayment::factory()->create([
+        'catering_bill_id' => $priorBill->id,
+        'catering_member_id' => $member->id,
+        'amount' => 10000,
+    ]);
+    createInvoiceBill($member, 2026, 10, 330000, [
+        'price_per_day' => 15000,
+        'saved_days' => 22,
+        'active_days' => 22,
+    ]);
+
+    $invoice = invoiceService()->buildMemberInvoice(
+        $member->fresh(['cateringCategory', 'schoolClass']),
+        $start,
+        $end,
+    );
+    $html = view('pdf.catering.invoice-member', $invoice)->render();
+    $pdf = invoiceService()->renderPdf($invoice);
+    $text = invoicePdfText($pdf);
+
+    expect($pdf)->toStartWith('%PDF-')
+        ->and(invoicePdfPageCount($pdf))->toBe(1)
+        ->and($invoice['attendanceRows'])->toHaveCount(22)
+        ->and($invoice['total'])->toBe(330000)
+        ->and($invoice['priorOutstandingRows'])->toBe([
+            [
+                'month' => 9,
+                'year' => 2026,
+                'periodLabel' => 'September 2026',
+                'remainingAmount' => 190000,
+                'remainingAmountFormatted' => 'Rp 190.000',
+            ],
+        ])
+        ->and($invoice['totalOutstanding'])->toBe(190000)
+        ->and($text)->toContain('TUNGGAKAN SEBELUMNYA')
+        ->and($text)->toContain('September 2026')
+        ->and($text)->toContain('PEMBAYARAN')
+        ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
+        ->and($text)->toContain('5222129702')
+        ->and($text)->toContain('0813-9994-7699')
+        ->and($text)->toContain('Hanya status Aktif yang dihitung.')
+        ->and($text)->toContain('Baris berstatus Libur tidak ditampilkan')
+        ->and($text)->toContain('Invoice ini dihasilkan otomatis dari data absensi yang telah disimpan.')
+        ->and($html)->not->toContain('page-break-before');
 });
 
 it('fits a shorter month individual invoice on a single a4 page', function (int $month, int $days) {
@@ -2479,7 +2581,7 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         'school_class_id' => $schoolClass->id,
         'catering_category_id' => $category->id,
     ]);
-    coverInvoiceMember($member);
+    coverInvoiceMember($member, '2026-08-01');
 
     CateringAttendanceInitializerService::ensureMonth(2026, 10);
     CateringAttendance::query()
@@ -2531,9 +2633,16 @@ it('prints the same rows and the same total in the class zip as in a direct pdf'
         ->and($fromZip)->not->toContain('Alfa')
         ->and($fromZip)->not->toContain('Tidak Ikut')
         ->and($invoice['totalOutstanding'])->toBe(225000)
-        ->and($fromZip)->toContain('TOTAL TUNGGAKAN')
+        ->and(array_column($invoice['priorOutstandingRows'], 'periodLabel'))->toBe(['Agustus 2026', 'September 2026'])
+        ->and(array_column($invoice['priorOutstandingRows'], 'remainingAmount'))->toBe([75000, 150000])
+        ->and($direct)->toContain('TUNGGAKAN SEBELUMNYA')
+        ->and($fromZip)->toContain('TUNGGAKAN SEBELUMNYA')
+        ->and($direct)->toContain('Agustus 2026')
+        ->and($fromZip)->toContain('Agustus 2026')
+        ->and($direct)->toContain('September 2026')
+        ->and($fromZip)->toContain('September 2026')
+        ->and($fromZip)->toContain('TOTAL OUTSTANDING')
         ->and($fromZip)->toContain('Rp 225.000')
-        ->and($fromZip)->not->toContain('BULAN LALU')
         ->and($direct)->toContain('Rp 525.000')
         ->and($fromZip)->toContain('Rp 525.000')
         ->and($direct)->toContain('Batas Pembayaran')

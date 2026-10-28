@@ -14,6 +14,88 @@ use InvalidArgumentException;
 
 class CateringUnitBillingService
 {
+    /**
+     * @param array{
+     *   employee_subsidy_enabled?: bool,
+     *   employee_subsidy_rate?: int,
+     *   student_subsidy_enabled?: bool,
+     *   student_subsidy_qty?: int,
+     *   student_subsidy_rate?: int
+     * } $subsidy
+     */
+    public function updateSubsidy(CateringUnitBill $bill, array $subsidy): CateringUnitBill
+    {
+        $bill = CateringUnitBill::query()->lockForUpdate()->findOrFail($bill->id);
+
+        $employeeEnabled = (bool) ($subsidy['employee_subsidy_enabled'] ?? false);
+        $employeeRate = max(0, (int) ($subsidy['employee_subsidy_rate'] ?? 0));
+        $employeeQty = (int) $bill->total_quantity;
+        $employeeAmount = $employeeEnabled ? ($employeeQty * $employeeRate) : 0;
+
+        $studentEnabled = (bool) ($subsidy['student_subsidy_enabled'] ?? false);
+        $studentQty = max(0, (int) ($subsidy['student_subsidy_qty'] ?? 0));
+        $studentRate = max(0, (int) ($subsidy['student_subsidy_rate'] ?? 0));
+        $studentAmount = $studentEnabled ? ($studentQty * $studentRate) : 0;
+
+        $totalSubsidy = $employeeAmount + $studentAmount;
+        $netAmount = max(0, (int) $bill->gross_amount - $totalSubsidy);
+
+        $bill->update([
+            'employee_subsidy_enabled' => $employeeEnabled,
+            'employee_subsidy_qty' => $employeeQty,
+            'employee_subsidy_rate' => $employeeRate,
+            'employee_subsidy_amount' => $employeeAmount,
+            'student_subsidy_enabled' => $studentEnabled,
+            'student_subsidy_qty' => $studentQty,
+            'student_subsidy_rate' => $studentRate,
+            'student_subsidy_amount' => $studentAmount,
+            'total_subsidy_amount' => $totalSubsidy,
+            'net_amount' => $netAmount,
+        ]);
+
+        return $bill->fresh();
+    }
+
+    public function ensureNetAmount(CateringUnitBill $bill): CateringUnitBill
+    {
+        return $this->recomputeNetForSync($bill);
+    }
+
+    private function recomputeNetForSync(CateringUnitBill $bill): CateringUnitBill
+    {
+        $employeeEnabled = (bool) $bill->employee_subsidy_enabled;
+        $employeeQty = $employeeEnabled ? (int) $bill->total_quantity : (int) ($bill->employee_subsidy_qty ?: 0);
+        $employeeRate = max(0, (int) $bill->employee_subsidy_rate);
+        $employeeAmount = $employeeEnabled ? ($employeeQty * $employeeRate) : 0;
+
+        $studentEnabled = (bool) $bill->student_subsidy_enabled;
+        $studentQty = max(0, (int) $bill->student_subsidy_qty);
+        $studentRate = max(0, (int) $bill->student_subsidy_rate);
+        $studentAmount = ($studentEnabled && $studentQty > 0) ? ($studentQty * $studentRate) : 0;
+
+        $totalSubsidy = $employeeAmount + $studentAmount;
+        $netAmount = max(0, (int) $bill->gross_amount - $totalSubsidy);
+
+        $needsUpdate = (int) $bill->employee_subsidy_qty !== $employeeQty
+            || (int) $bill->employee_subsidy_amount !== $employeeAmount
+            || (int) $bill->student_subsidy_amount !== $studentAmount
+            || (int) $bill->total_subsidy_amount !== $totalSubsidy
+            || (int) $bill->net_amount !== $netAmount;
+
+        if ($needsUpdate) {
+            $bill->employee_subsidy_qty = $employeeQty;
+            $bill->employee_subsidy_amount = $employeeAmount;
+            $bill->student_subsidy_amount = $studentAmount;
+            $bill->total_subsidy_amount = $totalSubsidy;
+            $bill->net_amount = $netAmount;
+            $bill->save();
+
+            return $bill;
+        }
+
+        return $bill;
+    }
+
     /** @return Collection<int, CateringUnitBill> */
     public function syncPeriod(int $month, int $year, ?int $generatedBy = null): Collection
     {
@@ -184,7 +266,8 @@ class CateringUnitBillingService
                 }
 
                 $lines = $this->sourceLines($rows);
-                $headers[] = [
+                $grossAmount = (int) collect($lines)->sum('subtotal');
+                $header = [
                     'catering_employee_unit_id' => $unitId,
                     'generated_by' => $generatedBy,
                     'period_month' => $month,
@@ -192,11 +275,23 @@ class CateringUnitBillingService
                     'unit_name' => $unit->name,
                     'total_quantity' => (int) $rows->sum('quantity'),
                     'price_per_person_snapshot' => $this->commonPrice($rows),
-                    'gross_amount' => (int) collect($lines)->sum('subtotal'),
+                    'gross_amount' => $grossAmount,
                     'generated_at' => $now,
                     'created_at' => $existingBill?->created_at ?? $now,
                     'updated_at' => $now,
+                    'employee_subsidy_enabled' => $existingBill ? (bool) $existingBill->employee_subsidy_enabled : false,
+                    'employee_subsidy_qty' => $existingBill ? (int) $existingBill->employee_subsidy_qty : 0,
+                    'employee_subsidy_rate' => $existingBill ? (int) $existingBill->employee_subsidy_rate : 0,
+                    'employee_subsidy_amount' => $existingBill ? (int) $existingBill->employee_subsidy_amount : 0,
+                    'student_subsidy_enabled' => $existingBill ? (bool) $existingBill->student_subsidy_enabled : false,
+                    'student_subsidy_qty' => $existingBill ? (int) $existingBill->student_subsidy_qty : 0,
+                    'student_subsidy_rate' => $existingBill ? (int) $existingBill->student_subsidy_rate : 0,
+                    'student_subsidy_amount' => $existingBill ? (int) $existingBill->student_subsidy_amount : 0,
+                    'total_subsidy_amount' => $existingBill ? (int) $existingBill->total_subsidy_amount : 0,
+                    'net_amount' => $existingBill ? (int) $existingBill->net_amount : $grossAmount,
                 ];
+
+                $headers[] = $header;
                 $linesByUnit[$unitId] = $lines;
             }
 
@@ -241,6 +336,50 @@ class CateringUnitBillingService
             }
 
             $this->replaceBillDays($billIds, $daySnapshots);
+
+            $billsCollection = CateringUnitBill::query()
+                ->whereKey($billIds)
+                ->orderBy('catering_employee_unit_id')
+                ->lockForUpdate()
+                ->get();
+
+            $updates = [];
+            foreach ($billsCollection as $bill) {
+                $employeeEnabled = (bool) $bill->employee_subsidy_enabled;
+                $employeeQty = $employeeEnabled ? (int) $bill->total_quantity : (int) ($bill->employee_subsidy_qty ?? 0);
+                $employeeRate = max(0, (int) $bill->employee_subsidy_rate);
+                $employeeAmount = $employeeEnabled ? ($employeeQty * $employeeRate) : 0;
+
+                $studentEnabled = (bool) $bill->student_subsidy_enabled;
+                $studentQty = max(0, (int) $bill->student_subsidy_qty);
+                $studentRate = max(0, (int) $bill->student_subsidy_rate);
+                $studentAmount = ($studentEnabled && $studentQty > 0) ? ($studentQty * $studentRate) : 0;
+
+                $totalSubsidy = $employeeAmount + $studentAmount;
+                $netAmount = max(0, (int) $bill->gross_amount - $totalSubsidy);
+
+                if ((int) $bill->employee_subsidy_qty !== $employeeQty
+                    || (int) $bill->employee_subsidy_amount !== $employeeAmount
+                    || (int) $bill->student_subsidy_amount !== $studentAmount
+                    || (int) $bill->total_subsidy_amount !== $totalSubsidy
+                    || (int) $bill->net_amount !== $netAmount) {
+                    $updates[] = [
+                        'id' => $bill->id,
+                        'employee_subsidy_qty' => $employeeQty,
+                        'employee_subsidy_amount' => $employeeAmount,
+                        'student_subsidy_amount' => $studentAmount,
+                        'total_subsidy_amount' => $totalSubsidy,
+                        'net_amount' => $netAmount,
+                    ];
+                }
+            }
+
+            if ($updates !== []) {
+                $now = now();
+                foreach ($updates as $update) {
+                    CateringUnitBill::query()->whereKey($update['id'])->update(array_merge($update, ['updated_at' => $now]));
+                }
+            }
 
             return CateringUnitBill::query()
                 ->with(['days' => fn ($query) => $query->orderBy('attendance_date')])

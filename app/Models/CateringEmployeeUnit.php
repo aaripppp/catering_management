@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Number;
 
-#[Fillable(['name', 'price_per_person', 'is_active', 'sort_order'])]
+#[Fillable(['name', 'price_per_person', 'default_employee_subsidy_rate', 'default_student_subsidy_rate', 'is_active', 'sort_order'])]
 class CateringEmployeeUnit extends Model
 {
     /** @use HasFactory<CateringEmployeeUnitFactory> */
@@ -22,6 +22,8 @@ class CateringEmployeeUnit extends Model
     {
         return [
             'price_per_person' => 'integer',
+            'default_employee_subsidy_rate' => 'integer',
+            'default_student_subsidy_rate' => 'integer',
             'is_active' => 'boolean',
             'sort_order' => 'integer',
         ];

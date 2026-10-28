@@ -333,6 +333,7 @@ class Index extends Component
                     ->where('attendance_date', '<', $periodStart->addMonth()->toDateString())
                     ->where('status', CateringAttendanceStatus::Ikut),
             ])
+            ->with('member')
             ->withSum('payments as paid_amount', 'amount')
             ->withSum('creditAllocations as credit_applied_amount', 'amount')
             ->withSum('generatedCredits as generated_credit_amount', 'original_amount')

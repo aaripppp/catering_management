@@ -31,4 +31,14 @@ class CateringUnitBillPolicy
     {
         return $user->isAdmin();
     }
+
+    public function update(User $user): bool
+    {
+        return $user->isAdmin();
+    }
+
+    public function manage(User $user): bool
+    {
+        return $user->isAdmin();
+    }
 }

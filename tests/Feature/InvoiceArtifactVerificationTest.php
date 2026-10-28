@@ -232,9 +232,9 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
             && str_contains($text, '28 November 2026')
             && ! str_contains($text, 'Jatuh Tempo')
             && ! str_contains($text, '28/11/2026') ? 1 : 0;
-        $directOutstandingLabels += str_contains($text, 'TOTAL TUNGGAKAN')
+        $directOutstandingLabels += str_contains($text, 'TOTAL OUTSTANDING')
             && ! str_contains($text, 'TUNGGAKAN SEPTEMBER 2026')
-            && ! str_contains($text, 'BULAN LALU') ? 1 : 0;
+            && ! str_contains($text, 'TUNGGAKAN SEBELUMNYA') ? 1 : 0;
 
         $dates = array_column($invoice['attendanceRows'], 'date');
         $printedWeekends += count(array_filter(
@@ -314,9 +314,9 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
             && str_contains($entryText, '28 November 2026')
             && ! str_contains($entryText, 'Jatuh Tempo')
             && ! str_contains($entryText, '28/11/2026') ? 1 : 0;
-        $zipOutstandingLabels += str_contains($entryText, 'TOTAL TUNGGAKAN')
+        $zipOutstandingLabels += str_contains($entryText, 'TOTAL OUTSTANDING')
             && ! str_contains($entryText, 'TUNGGAKAN SEPTEMBER 2026')
-            && ! str_contains($entryText, 'BULAN LALU') ? 1 : 0;
+            && ! str_contains($entryText, 'TUNGGAKAN SEBELUMNYA') ? 1 : 0;
         $zipReport[] = sprintf('   entry %-48s %8d B', $entryName, $archive->statIndex($index)['size']);
     }
 
@@ -366,9 +366,9 @@ it('writes reviewable direct and zip pdfs using libur-only visibility', function
         ->and($classText)->toContain('28 November 2026')
         ->and($classText)->not->toContain('Jatuh Tempo')
         ->and($classText)->not->toContain('28/11/2026')
-        ->and($classText)->toContain('TOTAL TUNGGAKAN')
+        ->and($classText)->toContain('Tunggakan Bulan Lalu')
+        ->and($classText)->toContain('Tunggakan bulan lalu merupakan sisa tagihan dari periode sebelum Oktober 2026 yang belum dilunasi.')
         ->and($classText)->not->toContain('TUNGGAKAN SEPTEMBER 2026')
-        ->and($classText)->not->toContain('BULAN LALU')
         ->and($classInvoice['confirmationReference'])->not->toContain('INV/')
         ->and($classText)->toContain($classInvoice['confirmationReference'])
         ->and($classText)->toContain('SUDAH TRANSFER')

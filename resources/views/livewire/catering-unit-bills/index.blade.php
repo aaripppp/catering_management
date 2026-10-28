@@ -112,19 +112,20 @@
 
     <section class="table-wrap">
         <div class="overflow-x-auto">
-            <table class="table w-full min-w-[1400px]">
-                <thead class="whitespace-nowrap">
+            <table class="table w-full min-w-[1250px]">
+                <thead class="whitespace-nowrap bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500">
                     <tr>
                         <th class="w-10 text-center">No</th>
                         <th>Unit</th>
                         <th class="text-right">Total Qty</th>
                         <th class="text-right">Harga/Porsi</th>
-                        <th class="text-right">Tagihan</th>
+                        <th class="text-right">Kotor</th>
+                        <th class="text-right">Subsidi</th>
+                        <th class="text-right">Bersih</th>
                         <th class="text-right">Terbayar</th>
-                        <th class="text-right">Lebih Bayar</th>
                         <th class="text-right">Sisa</th>
-                        <th>Status</th>
-                        <th class="text-right">Aksi</th>
+                        <th class="text-center">Status</th>
+                        <th class="text-right whitespace-nowrap">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -134,17 +135,18 @@
                             $status = $row['status'];
                             $unitName = $bill?->unit_name ?? $row['unit']->name;
                             $rowPaymentSummary = $bill === null ? null : $paymentSummaries[$bill->id];
-                            $canPay = $bill !== null && $status === CateringUnitBillSyncStatus::Synced && $bill->gross_amount > 0;
+                            $billNetCheck = $bill === null ? 0 : (int) ($bill->net_amount ?? max(0, (int)$bill->gross_amount - (int)($bill->total_subsidy_amount ?? 0)));
+                            $canPay = $bill !== null && $status === CateringUnitBillSyncStatus::Synced && $billNetCheck > 0;
                         @endphp
                         <tr wire:key="unit-bill-row-{{ $row['unit']->id }}-{{ $bill?->id ?? 'none' }}">
                             <td class="text-center text-sm text-slate-500">{{ $loop->iteration }}</td>
                             <td>
                                 <p class="whitespace-nowrap font-semibold text-slate-900">{{ $unitName }}</p>
                                 <span @class([
-                                    'mt-1 whitespace-nowrap',
+                                    'mt-1 inline-flex items-center whitespace-nowrap px-2.5 py-1 text-xs font-semibold',
                                     'badge-success' => $status === CateringUnitBillSyncStatus::Synced,
-                                    'inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200' => $status === CateringUnitBillSyncStatus::Stale,
-                                    'inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-200' => $status === CateringUnitBillSyncStatus::Unsynced,
+                                    'rounded-full bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200' => $status === CateringUnitBillSyncStatus::Stale,
+                                    'rounded-full bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200' => $status === CateringUnitBillSyncStatus::Unsynced,
                                     'badge-neutral' => $status === CateringUnitBillSyncStatus::NoData,
                                 ])>
                                     {{ match ($status) {
@@ -174,50 +176,82 @@
                                 @endif
                             </td>
                             <td class="whitespace-nowrap text-right font-semibold text-slate-900">
-                                {{ $bill === null ? '-' : 'Rp '.number_format($bill->gross_amount, 0, ',', '.') }}
+                                @if ($bill === null)
+                                    <span>-</span>
+                                @else
+                                    Rp {{ number_format($bill->gross_amount, 0, ',', '.') }}
+                                @endif
+                            </td>
+                            <td class="whitespace-nowrap text-right">
+                                @if ($bill === null)
+                                    <span>-</span>
+                                @else
+                                    @php
+                                        $billSubTotal = (int) ($bill->total_subsidy_amount ?? ((int)$bill->employee_subsidy_amount + (int)$bill->student_subsidy_amount));
+                                    @endphp
+                                    @if ($billSubTotal > 0)
+                                        <span class="font-semibold text-emerald-700">-Rp {{ number_format($billSubTotal, 0, ',', '.') }}</span>
+                                    @else
+                                        <span class="text-slate-500">Rp 0</span>
+                                    @endif
+                                @endif
+                            </td>
+                            <td class="whitespace-nowrap text-right font-semibold text-blue-700">
+                                @if ($bill === null)
+                                    <span>-</span>
+                                @else
+                                    @php
+                                        $billSubTotal = (int) ($bill->total_subsidy_amount ?? ((int)$bill->employee_subsidy_amount + (int)$bill->student_subsidy_amount));
+                                        $billNetTotal = (int) ($bill->net_amount ?? max(0, (int)$bill->gross_amount - $billSubTotal));
+                                    @endphp
+                                    Rp {{ number_format($billNetTotal, 0, ',', '.') }}
+                                @endif
                             </td>
                             <td class="whitespace-nowrap text-right text-emerald-700">
                                 {{ $rowPaymentSummary === null ? '-' : 'Rp '.number_format($rowPaymentSummary['paid_amount'], 0, ',', '.') }}
-                            </td>
-                            <td class="whitespace-nowrap text-right font-semibold {{ ($rowPaymentSummary['overpaid_amount'] ?? 0) > 0 ? 'text-violet-700' : 'text-slate-500' }}">
-                                {{ $rowPaymentSummary === null ? '-' : 'Rp '.number_format($rowPaymentSummary['overpaid_amount'], 0, ',', '.') }}
+                                @if ($rowPaymentSummary !== null && ($rowPaymentSummary['overpaid_amount'] ?? 0) > 0)
+                                    <div class="mt-0.5 text-xs font-medium text-violet-700">Lebih bayar Rp {{ number_format($rowPaymentSummary['overpaid_amount'], 0, ',', '.') }}</div>
+                                @endif
                             </td>
                             <td class="whitespace-nowrap text-right font-semibold {{ ($rowPaymentSummary['remaining_amount'] ?? 0) > 0 ? 'text-amber-700' : 'text-slate-500' }}">
                                 {{ $rowPaymentSummary === null ? '-' : 'Rp '.number_format($rowPaymentSummary['remaining_amount'], 0, ',', '.') }}
                             </td>
-                            <td>
+                            <td class="text-center">
                                 @if ($rowPaymentSummary === null)
                                     <span class="text-xs text-slate-400">-</span>
                                 @else
                                     <span @class([
-                                        'whitespace-nowrap',
+                                        'whitespace-nowrap inline-flex items-center justify-center',
                                         'badge-success' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Paid,
-                                        'inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Partial,
+                                        'rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Partial,
                                         'badge-neutral' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Unpaid,
-                                        'inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Overpaid,
+                                        'rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200' => $rowPaymentSummary['status'] === CateringUnitBillPaymentStatus::Overpaid,
                                     ])>{{ $rowPaymentSummary['status_label'] }}</span>
                                 @endif
                             </td>
                             <td class="whitespace-nowrap text-right">
-                                <div class="flex justify-end gap-1">
+                                <div class="flex flex-nowrap items-center justify-end gap-1">
                                     @if ($bill !== null)
+                                        @if ($status === CateringUnitBillSyncStatus::Synced)
+                                            <button type="button" wire:click="openSubsidy({{ $bill->id }})" class="btn-secondary whitespace-nowrap px-2.5 py-1.5 text-xs">Atur Subsidi</button>
+                                        @endif
                                         @if ($canPay)
-                                            <button type="button" wire:click="openPayment({{ $bill->id }})" wire:loading.attr="disabled" wire:target="openPayment({{ $bill->id }})" class="btn-primary whitespace-nowrap px-3 py-1.5 text-xs" wire:key="unit-bill-pay-{{ $bill->id }}">Bayar</button>
+                                            <button type="button" wire:click="openPayment({{ $bill->id }})" wire:loading.attr="disabled" wire:target="openPayment({{ $bill->id }})" class="btn-primary whitespace-nowrap px-2.5 py-1.5 text-xs" wire:key="unit-bill-pay-{{ $bill->id }}">Bayar</button>
                                         @else
                                             <span
                                                 aria-disabled="true"
-                                                class="inline-flex cursor-not-allowed items-center rounded-lg bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-400 ring-1 ring-inset ring-slate-200"
+                                                class="inline-flex cursor-not-allowed items-center rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-400 ring-1 ring-inset ring-slate-200"
                                                 title="{{ $status === CateringUnitBillSyncStatus::Stale ? 'Sinkronkan tagihan terlebih dahulu.' : 'Tagihan unit tidak memiliki nilai tagihan.' }}"
                                             >Bayar</span>
                                         @endif
-                                        <button type="button" wire:click="openHistory({{ $bill->id }})" class="btn-secondary whitespace-nowrap px-3 py-1.5 text-xs">Riwayat</button>
+                                        <button type="button" wire:click="openHistory({{ $bill->id }})" class="btn-secondary whitespace-nowrap px-2.5 py-1.5 text-xs">Riwayat</button>
                                     @endif
                                     @if ($status === CateringUnitBillSyncStatus::Synced && $bill !== null)
                                         <a
                                             href="{{ route('catering-unit-bills.invoice', $bill) }}"
                                             target="_blank"
                                             rel="noopener"
-                                            class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
+                                            class="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
                                             title="Buka invoice {{ $unitName }} di tab baru"
                                             aria-label="Invoice {{ $unitName }}"
                                         >
@@ -242,7 +276,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="10" class="py-12 text-center">
+                            <td colspan="11" class="py-12 text-center">
                                 <p class="font-medium text-slate-700">Belum ada unit catering untuk ditampilkan.</p>
                             </td>
                         </tr>
@@ -381,6 +415,107 @@
                 <div class="flex justify-end gap-2 px-5 py-4">
                     <button type="button" wire:click="closeDeletePaymentModal" class="btn-secondary whitespace-nowrap">Batal</button>
                     <button type="button" wire:click="deletePayment" wire:loading.attr="disabled" wire:target="deletePayment" class="btn-danger whitespace-nowrap">Hapus</button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($showSubsidyModal)
+        <div class="fixed inset-0 z-[10001] flex items-center justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="unit-subsidy-modal-title">
+            <div wire:click="closeSubsidyModal" class="absolute inset-0 bg-slate-950/55" aria-hidden="true"></div>
+            <div class="relative z-10 flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <div>
+                        <h3 id="unit-subsidy-modal-title" class="text-base font-semibold text-slate-900">Atur Subsidi — {{ $subsidyUnitName }}</h3>
+                        <p class="mt-1 text-sm text-slate-500">Periode: {{ $monthOptions[$subsidyPeriodMonth] }} {{ $subsidyPeriodYear }}</p>
+                    </div>
+                    <button type="button" wire:click="closeSubsidyModal" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+
+                <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="rounded-lg bg-slate-50 p-3"><p class="text-xs text-slate-500">Tagihan Kotor</p><p class="mt-1 whitespace-nowrap font-semibold text-slate-900">Rp {{ number_format($subsidyGrossAmount, 0, ',', '.') }}</p></div>
+                        <div class="rounded-lg bg-slate-50 p-3"><p class="text-xs text-slate-500">Total Porsi Pegawai</p><p class="mt-1 whitespace-nowrap font-semibold text-slate-900">{{ number_format($subsidyEmployeeQty, 0, ',', '.') }} porsi</p></div>
+                    </div>
+
+                    <div class="space-y-3 rounded-xl border border-slate-200 p-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">Subsidi Pegawai</p>
+                                <p class="text-xs text-slate-500">Jumlah porsi diambil otomatis dari Absensi Unit periode ini.</p>
+                            </div>
+                            <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" wire:model.live="subsidyEmployeeEnabled" class="rounded border-slate-300 text-blue-600"> Aktif</label>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="label">Jumlah porsi pegawai</label>
+                                <input type="text" value="{{ number_format($subsidyEmployeeQty, 0, ',', '.') }} porsi" class="input bg-slate-50" disabled />
+                            </div>
+                            <div>
+                                <label class="label">Subsidi per porsi</label>
+                                <input type="number" wire:model.live="subsidyEmployeeRate" class="input" min="0" />
+                                @error('subsidyEmployeeRate')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Subtotal Subsidi Pegawai</p>
+                            <p class="mt-1 font-semibold text-slate-900">Rp {{ number_format($this->subsidyEmployeeAmount, 0, ',', '.') }}</p>
+                            <p class="mt-0.5 text-xs text-slate-500">{{ number_format($subsidyEmployeeQty, 0, ',', '.') }} × Rp {{ number_format((int)$subsidyEmployeeRate, 0, ',', '.') }}</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 rounded-xl border border-slate-200 p-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">Subsidi Siswa</p>
+                                <p class="text-xs text-slate-500">Masukkan jumlah siswa yang memberikan subsidi.</p>
+                            </div>
+                            <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" wire:model.live="subsidyStudentEnabled" class="rounded border-slate-300 text-blue-600"> Aktif</label>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="label">Jumlah siswa</label>
+                                <input type="number" wire:model.live="subsidyStudentQty" class="input" min="0" />
+                                @error('subsidyStudentQty')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
+                            <div>
+                                <label class="label">Subsidi per siswa</label>
+                                <input type="number" wire:model.live="subsidyStudentRate" class="input" min="0" />
+                                @error('subsidyStudentRate')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3">
+                            <p class="text-xs text-slate-500">Subtotal Subsidi Siswa</p>
+                            <p class="mt-1 font-semibold text-slate-900">Rp {{ number_format($this->subsidyStudentAmount, 0, ',', '.') }}</p>
+                            <p class="mt-0.5 text-xs text-slate-500">{{ number_format((int)$subsidyStudentQty, 0, ',', '.') }} × Rp {{ number_format((int)$subsidyStudentRate, 0, ',', '.') }}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="rounded-lg bg-blue-50 p-3">
+                            <p class="text-xs text-blue-700">Total Subsidi</p>
+                            <p class="mt-1 text-lg font-semibold text-blue-900">Rp {{ number_format($this->subsidyTotalAmount, 0, ',', '.') }}</p>
+                            <p class="mt-0.5 text-xs text-blue-700">Pegawai: Rp {{ number_format($this->subsidyEmployeeAmount, 0, ',', '.') }} + Siswa: Rp {{ number_format($this->subsidyStudentAmount, 0, ',', '.') }}</p>
+                        </div>
+                        <div class="rounded-lg bg-emerald-50 p-3">
+                            <p class="text-xs text-emerald-700">Tagihan Bersih</p>
+                            <p class="mt-1 text-lg font-semibold text-emerald-900">Rp {{ number_format($this->subsidyNetAmount, 0, ',', '.') }}</p>
+                            <p class="mt-0.5 text-xs text-emerald-700">Rp {{ number_format($subsidyGrossAmount, 0, ',', '.') }} - Rp {{ number_format($this->subsidyTotalAmount, 0, ',', '.') }}</p>
+                            @if ($this->subsidyTotalAmount > $subsidyGrossAmount)
+                                <p class="mt-1 text-xs text-amber-700">Total subsidi melebihi tagihan kotor. Tagihan bersih menjadi Rp0.</p>
+                            @endif
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeSubsidyModal" class="btn-secondary whitespace-nowrap">Batal</button>
+                        <button type="button" wire:click="saveSubsidy" wire:loading.attr="disabled" wire:target="saveSubsidy" class="btn-primary whitespace-nowrap">
+                            <span wire:loading.remove wire:target="saveSubsidy">Simpan Subsidi</span>
+                            <span wire:loading wire:target="saveSubsidy">Menyimpan...</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
