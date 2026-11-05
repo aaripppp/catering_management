@@ -82,7 +82,10 @@
                 <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Total Terbayar Siswa</p>
                     <p class="mt-2 whitespace-nowrap text-2xl font-bold text-emerald-700">Rp {{ number_format($financialOverview['student']['paid'], 0, ',', '.') }}</p>
-                    <p class="mt-1 text-xs text-slate-500">Pembayaran dan kredit terpakai</p>
+                    <p class="mt-1 text-xs text-slate-500">Pembayaran yang menutup tagihan</p>
+                    @if ($financialOverview['student']['overpaid'] > 0)
+                        <p class="mt-1 text-xs text-violet-700">Lebih bayar bulan ini: Rp {{ number_format($financialOverview['student']['overpaid'], 0, ',', '.') }}</p>
+                    @endif
                 </div>
                 <div class="rounded-xl border border-amber-200 bg-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
                     <p class="text-xs font-semibold uppercase tracking-wide text-amber-700">Tunggakan Siswa</p>
@@ -102,6 +105,10 @@
                 <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Total Terbayar Unit</p>
                     <p class="mt-2 whitespace-nowrap text-2xl font-bold text-emerald-700">Rp {{ number_format($financialOverview['unit']['paid'], 0, ',', '.') }}</p>
+                    <p class="mt-1 text-xs text-slate-500">Pembayaran yang menutup tagihan</p>
+                    @if ($financialOverview['unit']['overpaid'] > 0)
+                        <p class="mt-1 text-xs text-violet-700">Lebih bayar bulan ini: Rp {{ number_format($financialOverview['unit']['overpaid'], 0, ',', '.') }}</p>
+                    @endif
                 </div>
                 <div class="rounded-xl border border-amber-200 bg-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
                     <p class="text-xs font-semibold uppercase tracking-wide text-amber-700">Tunggakan Unit</p>
@@ -118,20 +125,17 @@
         <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
             <h4 class="text-sm font-bold text-slate-900">Budaya Makan</h4>
             <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tagihan Tercatat</p>
-                    <p class="mt-2 whitespace-nowrap text-2xl font-bold text-slate-900">Rp {{ number_format($financialOverview['culture']['billed'], 0, ',', '.') }}</p>
-                    <p class="mt-1 text-xs text-slate-500">{{ number_format($financialOverview['culture']['recorded_count'], 0, ',', '.') }} data × Rp {{ number_format($financialOverview['culture']['price'], 0, ',', '.') }}</p>
-                </div>
                 <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Pemasukan Manual</p>
                     <p class="mt-2 whitespace-nowrap text-2xl font-bold text-emerald-700">Rp {{ number_format($financialOverview['culture']['income'], 0, ',', '.') }}</p>
                 </div>
-                <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Selisih</p>
-                    <p class="mt-2 whitespace-nowrap text-2xl font-bold {{ $financialOverview['culture']['difference'] < 0 ? 'text-violet-700' : 'text-blue-700' }}">
-                        {{ $financialOverview['culture']['difference'] < 0 ? '-Rp '.number_format(abs($financialOverview['culture']['difference']), 0, ',', '.') : 'Rp '.number_format($financialOverview['culture']['difference'], 0, ',', '.') }}
-                    </p>
+                <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Jumlah Transaksi</p>
+                    <p class="mt-2 whitespace-nowrap text-2xl font-bold text-blue-700">{{ number_format($financialOverview['culture']['transaction_count'], 0, ',', '.') }} transaksi</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Periode</p>
+                    <p class="mt-2 whitespace-nowrap text-2xl font-bold text-slate-900">{{ $financialOverview['culture']['period_label'] }}</p>
                 </div>
             </div>
         </div>
@@ -274,7 +278,7 @@
                         <tbody>
                             @foreach ([
                                 ['Total Tagihan', 'Rp '.number_format($summary['gross_amount'], 0, ',', '.')],
-                                ['Total Terbayar', 'Rp '.number_format($summary['paid_amount'], 0, ',', '.')],
+                                ['Total Terbayar', 'Rp '.number_format($summary['recognized_paid_amount'], 0, ',', '.')],
                                 ['Tunggakan', 'Rp '.number_format($summary['outstanding_amount'], 0, ',', '.')],
                                 ['Lebih Bayar', 'Rp '.number_format($summary['overpayment_amount'], 0, ',', '.')],
                                 ['Lunas', number_format($summary['paid_count'], 0, ',', '.')],
@@ -321,16 +325,9 @@
                     <table class="table w-full text-sm">
                         <thead><tr><th>Keterangan</th><th class="text-right">Jumlah</th></tr></thead>
                         <tbody>
-                            <tr><td class="font-medium text-slate-700">Data Tercatat</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">{{ number_format($financialOverview['culture']['recorded_count'], 0, ',', '.') }}</td></tr>
-                            <tr><td class="font-medium text-slate-700">Harga Budaya Makan</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">Rp {{ number_format($financialOverview['culture']['price'], 0, ',', '.') }}</td></tr>
-                            <tr><td class="font-medium text-slate-700">Tagihan Tercatat</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">Rp {{ number_format($financialOverview['culture']['billed'], 0, ',', '.') }}</td></tr>
                             <tr><td class="font-medium text-slate-700">Pemasukan Manual</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">Rp {{ number_format($financialOverview['culture']['income'], 0, ',', '.') }}</td></tr>
-                            <tr>
-                                <td class="font-medium text-slate-700">Selisih</td>
-                                <td class="whitespace-nowrap text-right font-semibold {{ $financialOverview['culture']['difference'] < 0 ? 'text-violet-700' : 'text-slate-900' }}">
-                                    {{ $financialOverview['culture']['difference'] < 0 ? '-Rp '.number_format(abs($financialOverview['culture']['difference']), 0, ',', '.') : 'Rp '.number_format($financialOverview['culture']['difference'], 0, ',', '.') }}
-                                </td>
-                            </tr>
+                            <tr><td class="font-medium text-slate-700">Jumlah Transaksi</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">{{ number_format($financialOverview['culture']['transaction_count'], 0, ',', '.') }} transaksi</td></tr>
+                            <tr><td class="font-medium text-slate-700">Periode</td><td class="whitespace-nowrap text-right font-semibold text-slate-900">{{ $financialOverview['culture']['period_label'] }}</td></tr>
                         </tbody>
                     </table>
                 </article>

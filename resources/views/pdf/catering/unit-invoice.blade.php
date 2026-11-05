@@ -115,10 +115,18 @@
             @if (($studentSubsidyAmount ?? 0) > 0)
                 <tr><td class="label">Subsidi Siswa</td><td class="value">- {{ $studentSubsidyAmountFormatted ?? number_format($studentSubsidyAmount, 0, ',', '.') }}</td></tr>
             @endif
-            <tr><td class="label">Total Tagihan</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
-        @else
-            <tr class="grand"><td class="label">Tagihan Bulan Ini</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
         @endif
+    </table>
+
+    <table class="summary">
+        <tr><td class="label">Tagihan Bersih</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+        @if (($creditAppliedAmount ?? 0) > 0)
+            <tr><td class="label">Kredit Periode Sebelumnya</td><td class="value">- {{ $creditAppliedAmountFormatted ?? number_format($creditAppliedAmount, 0, ',', '.') }}</td></tr>
+        @endif
+        @if (($cashPaidAmount ?? 0) > 0)
+            <tr><td class="label">Pembayaran Tunai</td><td class="value">- {{ $cashPaidAmountFormatted ?? number_format($cashPaidAmount, 0, ',', '.') }}</td></tr>
+        @endif
+        <tr class="grand"><td class="label">Sisa Tagihan Bulan Ini</td><td class="value">{{ ($remainingAmountFormatted ?? $netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
     </table>
 
     @if ($priorOutstandingRows !== [])
@@ -147,7 +155,8 @@
         </table>
 
         <table class="summary">
-            <tr><td class="label">Total Tagihan Periode Ini</td><td class="value">{{ ($netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+            <tr><td class="label">Sisa Tagihan Bulan Ini</td><td class="value">{{ ($remainingAmountFormatted ?? $netAmountFormatted ?? $grossAmountFormatted) }}</td></tr>
+            <tr><td class="label">Total Outstanding</td><td class="value">{{ $totalOutstandingFormatted }}</td></tr>
             <tr class="grand"><td class="label">Total Harus Dibayar</td><td class="value">{{ $totalDueFormatted }}</td></tr>
         </table>
     @endif

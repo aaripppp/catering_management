@@ -37,16 +37,14 @@ class CateringMonthlyReportService
     public function __construct(
         private CateringUnitPaymentService $unitPaymentService,
         private CateringUnitBillingService $unitBillingService,
-        private CateringCultureMealMonitoringService $cultureMealMonitoringService,
         private CateringCultureMealIncomeService $cultureMealIncomeService,
-        private CateringCultureMealSettingService $cultureMealSettingService,
     ) {}
 
     /**
      * @return array{
-     *     student: array{billed: int, paid: int, remaining: int},
+     *     student: array{billed: int, paid: int, remaining: int, overpaid: int},
      *     unit: array{billed: int, paid: int, remaining: int, overpaid: int, paid_count: int, partial_count: int, unpaid_count: int, has_stale: bool, stale_count: int},
-     *     culture: array{recorded_count: int, price: int, billed: int, income: int, difference: int},
+     *     culture: array{income: int, transaction_count: int, period_label: string},
      *     total: array{billed: int, paid: int, uncovered_difference: int}
      * }
      */
@@ -59,10 +57,13 @@ class CateringMonthlyReportService
             'jenjang' => '',
             'schoolClassId' => '',
         ]);
+        // Overpayment from selected-period bills is carried forward as credit,
+        // so only the recognized settlement closes the selected period.
         $student = [
             'billed' => $studentSummary['gross_amount'],
-            'paid' => $studentSummary['paid_amount'],
+            'paid' => max($studentSummary['paid_amount'] - $studentSummary['overpayment_amount'], 0),
             'remaining' => $studentSummary['outstanding_amount'],
+            'overpaid' => $studentSummary['overpayment_amount'],
         ];
 
         $unitSummary = $this->unitPaymentService->periodSummary($month, $year);
@@ -82,16 +83,11 @@ class CateringMonthlyReportService
             'stale_count' => $staleUnitBillCount,
         ];
 
-        $cultureMonitoring = $this->cultureMealMonitoringService->monitor($month, $year);
-        $culturePrice = $this->cultureMealSettingService->getCultureMealPrice();
-        $cultureBilled = $cultureMonitoring['total'] * $culturePrice;
-        $cultureIncome = $this->cultureMealIncomeService->monthlyTotal($month, $year);
+        $cultureSummary = $this->cultureMealIncomeService->monthlySummary($month, $year);
         $culture = [
-            'recorded_count' => $cultureMonitoring['total'],
-            'price' => $culturePrice,
-            'billed' => $cultureBilled,
-            'income' => $cultureIncome,
-            'difference' => $cultureBilled - $cultureIncome,
+            'income' => $cultureSummary['total'],
+            'transaction_count' => $cultureSummary['transaction_count'],
+            'period_label' => (self::MONTH_NAMES[$month] ?? '').' '.$year,
         ];
 
         return [
@@ -99,9 +95,9 @@ class CateringMonthlyReportService
             'unit' => $unit,
             'culture' => $culture,
             'total' => [
-                'billed' => $student['billed'] + $unit['billed'] + $culture['billed'],
+                'billed' => $student['billed'] + $unit['billed'],
                 'paid' => $student['paid'] + $unit['paid'] + $culture['income'],
-                'uncovered_difference' => $student['remaining'] + $unit['remaining'] + max($culture['difference'], 0),
+                'uncovered_difference' => $student['remaining'] + $unit['remaining'],
             ],
         ];
     }
@@ -147,7 +143,7 @@ class CateringMonthlyReportService
 
     /**
      * @param  array{month: int, year: int, participantGroup: string, jenjang: string, schoolClassId: string}  $filters
-     * @return array{bill_count: int, gross_amount: int, money_in: int, credit_used: int, paid_amount: int, outstanding_amount: int, overpayment_amount: int, paid_count: int, partial_count: int, unpaid_count: int}
+     * @return array{bill_count: int, gross_amount: int, money_in: int, credit_used: int, paid_amount: int, recognized_paid_amount: int, outstanding_amount: int, overpayment_amount: int, paid_count: int, partial_count: int, unpaid_count: int}
      */
     public function summary(array $filters): array
     {
@@ -165,14 +161,18 @@ class CateringMonthlyReportService
             ->selectRaw('SUM(CASE WHEN payment_status = ? THEN 1 ELSE 0 END) as unpaid_count', [CateringBillStatus::Unpaid->value])
             ->first();
 
+        $paidAmount = (int) ($row?->paid_amount ?? 0);
+        $overpaymentAmount = (int) ($row?->overpayment_amount ?? 0);
+
         return [
             'bill_count' => (int) ($row?->bill_count ?? 0),
             'gross_amount' => (int) ($row?->gross_amount ?? 0),
             'money_in' => (int) ($row?->money_in ?? 0),
             'credit_used' => (int) ($row?->credit_used ?? 0),
-            'paid_amount' => (int) ($row?->paid_amount ?? 0),
+            'paid_amount' => $paidAmount,
+            'recognized_paid_amount' => max($paidAmount - $overpaymentAmount, 0),
             'outstanding_amount' => (int) ($row?->outstanding_amount ?? 0),
-            'overpayment_amount' => (int) ($row?->overpayment_amount ?? 0),
+            'overpayment_amount' => $overpaymentAmount,
             'paid_count' => (int) ($row?->paid_count ?? 0),
             'partial_count' => (int) ($row?->partial_count ?? 0),
             'unpaid_count' => (int) ($row?->unpaid_count ?? 0),

@@ -81,4 +81,63 @@ class CateringUnitBill extends Model
     {
         return $this->hasMany(CateringUnitPayment::class);
     }
+
+    /** @return HasMany<CateringUnitCreditAllocation, $this> */
+    public function creditAllocations(): HasMany
+    {
+        return $this->hasMany(CateringUnitCreditAllocation::class);
+    }
+
+    /** @return HasMany<CateringUnitCredit, $this> */
+    public function generatedCredits(): HasMany
+    {
+        return $this->hasMany(CateringUnitCredit::class, 'source_unit_bill_id');
+    }
+
+    public function billedAmount(): int
+    {
+        $attributes = $this->getAttributes();
+
+        if (array_key_exists('net_amount', $attributes) && $attributes['net_amount'] !== null) {
+            return (int) $attributes['net_amount'];
+        }
+
+        return max(0, (int) $this->gross_amount - (int) ($this->total_subsidy_amount ?? 0));
+    }
+
+    public function paidAmount(): int
+    {
+        return array_key_exists('payments_sum_amount', $this->attributes)
+            ? (int) $this->attributes['payments_sum_amount']
+            : (int) $this->payments()->sum('amount');
+    }
+
+    public function creditAppliedAmount(): int
+    {
+        return array_key_exists('credit_allocations_sum_amount', $this->attributes)
+            ? (int) $this->attributes['credit_allocations_sum_amount']
+            : (int) $this->creditAllocations()->sum('amount');
+    }
+
+    public function recognizedPaidAmount(): int
+    {
+        return min($this->billedAmount(), $this->paidAmount() + $this->creditAppliedAmount());
+    }
+
+    public function remainingAmount(): int
+    {
+        return max(0, $this->billedAmount() - $this->paidAmount() - $this->creditAppliedAmount());
+    }
+
+    public function generatedCreditAmount(): int
+    {
+        return (int) $this->generatedCredits()->sum('original_amount');
+    }
+
+    public function hasFinancialHistory(): bool
+    {
+        return $this->payments()->exists()
+            || $this->creditAllocations()->exists()
+            || $this->generatedCredits()->exists();
+    }
 }

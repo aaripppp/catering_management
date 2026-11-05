@@ -208,7 +208,10 @@
                                 @endif
                             </td>
                             <td class="whitespace-nowrap text-right text-emerald-700">
-                                {{ $rowPaymentSummary === null ? '-' : 'Rp '.number_format($rowPaymentSummary['paid_amount'], 0, ',', '.') }}
+                                {{ $rowPaymentSummary === null ? '-' : 'Rp '.number_format($rowPaymentSummary['recognized_paid_amount'], 0, ',', '.') }}
+                                @if ($rowPaymentSummary !== null && ($rowPaymentSummary['credit_applied_amount'] ?? 0) > 0)
+                                    <div class="mt-0.5 text-xs font-medium text-violet-700">Kredit digunakan: Rp {{ number_format($rowPaymentSummary['credit_applied_amount'], 0, ',', '.') }}</div>
+                                @endif
                                 @if ($rowPaymentSummary !== null && ($rowPaymentSummary['overpaid_amount'] ?? 0) > 0)
                                     <div class="mt-0.5 text-xs font-medium text-violet-700">Lebih bayar Rp {{ number_format($rowPaymentSummary['overpaid_amount'], 0, ',', '.') }}</div>
                                 @endif
@@ -303,7 +306,13 @@
                 <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
                     <div class="grid grid-cols-2 gap-3">
                         <div class="rounded-lg bg-slate-50 p-3"><p class="text-xs text-slate-500">Tagihan</p><p class="mt-1 whitespace-nowrap font-semibold text-slate-900">Rp {{ number_format($paymentSummary['billed_amount'], 0, ',', '.') }}</p></div>
-                        <div class="rounded-lg bg-emerald-50 p-3"><p class="text-xs text-emerald-700">Terbayar</p><p class="mt-1 whitespace-nowrap font-semibold text-emerald-900">Rp {{ number_format($paymentSummary['paid_amount'], 0, ',', '.') }}</p></div>
+                        <div class="rounded-lg bg-emerald-50 p-3">
+                            <p class="text-xs text-emerald-700">Terbayar</p>
+                            <p class="mt-1 whitespace-nowrap font-semibold text-emerald-900">Rp {{ number_format($paymentSummary['recognized_paid_amount'], 0, ',', '.') }}</p>
+                            @if ($paymentSummary['credit_applied_amount'] > 0)
+                                <p class="mt-0.5 text-xs text-emerald-700">Tunai Rp {{ number_format($paymentSummary['paid_amount'], 0, ',', '.') }} + Kredit Rp {{ number_format($paymentSummary['credit_applied_amount'], 0, ',', '.') }}</p>
+                            @endif
+                        </div>
                         <div class="rounded-lg bg-amber-50 p-3"><p class="text-xs text-amber-700">Sisa</p><p class="mt-1 whitespace-nowrap font-semibold text-amber-900">Rp {{ number_format($paymentSummary['remaining_amount'], 0, ',', '.') }}</p></div>
                         <div class="rounded-lg bg-violet-50 p-3"><p class="text-xs text-violet-700">Lebih Bayar</p><p class="mt-1 whitespace-nowrap font-semibold text-violet-900">Rp {{ number_format($paymentSummary['overpaid_amount'], 0, ',', '.') }}</p></div>
                     </div>
@@ -359,7 +368,13 @@
                 <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
                     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         <div class="rounded-lg bg-slate-50 p-3"><p class="text-xs text-slate-500">Tagihan</p><p class="mt-1 whitespace-nowrap font-semibold text-slate-900">Rp {{ number_format($historySummary['billed_amount'], 0, ',', '.') }}</p></div>
-                        <div class="rounded-lg bg-emerald-50 p-3"><p class="text-xs text-emerald-700">Terbayar</p><p class="mt-1 whitespace-nowrap font-semibold text-emerald-900">Rp {{ number_format($historySummary['paid_amount'], 0, ',', '.') }}</p></div>
+                        <div class="rounded-lg bg-emerald-50 p-3">
+                            <p class="text-xs text-emerald-700">Terbayar</p>
+                            <p class="mt-1 whitespace-nowrap font-semibold text-emerald-900">Rp {{ number_format($historySummary['recognized_paid_amount'], 0, ',', '.') }}</p>
+                            @if ($historySummary['credit_applied_amount'] > 0)
+                                <p class="mt-0.5 text-xs text-emerald-700">Tunai Rp {{ number_format($historySummary['paid_amount'], 0, ',', '.') }} + Kredit Rp {{ number_format($historySummary['credit_applied_amount'], 0, ',', '.') }}</p>
+                            @endif
+                        </div>
                         <div class="rounded-lg bg-amber-50 p-3"><p class="text-xs text-amber-700">Sisa</p><p class="mt-1 whitespace-nowrap font-semibold text-amber-900">Rp {{ number_format($historySummary['remaining_amount'], 0, ',', '.') }}</p></div>
                         <div class="rounded-lg bg-violet-50 p-3"><p class="text-xs text-violet-700">Lebih Bayar</p><p class="mt-1 whitespace-nowrap font-semibold text-violet-900">Rp {{ number_format($historySummary['overpaid_amount'], 0, ',', '.') }}</p></div>
                     </div>

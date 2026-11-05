@@ -46,6 +46,8 @@ class CateringUnitInvoiceService
 
         $bill = $this->billingService->ensureNetAmount($bill);
         $bill->load(['days' => fn ($query) => $query->orderBy('attendance_date')]);
+        $bill->loadSum('payments', 'amount');
+        $bill->loadSum('creditAllocations', 'amount');
         $period = CarbonImmutable::create($bill->period_year, $bill->period_month, 1)->startOfMonth();
         $invoiceDate = $period->addMonth()->startOfMonth();
         $dueDate = $invoiceDate->setDay(28);
@@ -59,6 +61,10 @@ class CateringUnitInvoiceService
         $studentSubsidyAmount = (int) $bill->student_subsidy_amount;
         $totalSubsidyAmount = (int) ($bill->total_subsidy_amount ?: ($employeeSubsidyAmount + $studentSubsidyAmount));
         $netAmount = (int) ($bill->net_amount ?: max(0, (int) $bill->gross_amount - $totalSubsidyAmount));
+        $cashPaidAmount = (int) ($bill->payments_sum_amount ?? 0);
+        $creditAppliedAmount = (int) ($bill->credit_allocations_sum_amount ?? 0);
+        $recognizedPaidAmount = min($netAmount, $cashPaidAmount + $creditAppliedAmount);
+        $remainingAmount = max(0, $netAmount - $cashPaidAmount - $creditAppliedAmount);
 
         return [
             'billId' => $bill->id,
@@ -101,11 +107,19 @@ class CateringUnitInvoiceService
             'netAmountFormatted' => $this->formatRupiah($netAmount),
             'billedAmount' => $netAmount,
             'billedAmountFormatted' => $this->formatRupiah($netAmount),
+            'cashPaidAmount' => $cashPaidAmount,
+            'cashPaidAmountFormatted' => $this->formatRupiah($cashPaidAmount),
+            'creditAppliedAmount' => $creditAppliedAmount,
+            'creditAppliedAmountFormatted' => $this->formatRupiah($creditAppliedAmount),
+            'recognizedPaidAmount' => $recognizedPaidAmount,
+            'recognizedPaidAmountFormatted' => $this->formatRupiah($recognizedPaidAmount),
+            'remainingAmount' => $remainingAmount,
+            'remainingAmountFormatted' => $this->formatRupiah($remainingAmount),
             'priorOutstandingRows' => $outstandingBreakdown['rows'],
             'totalOutstanding' => $outstandingBreakdown['total'],
             'totalOutstandingFormatted' => $this->formatRupiah($outstandingBreakdown['total']),
-            'totalDue' => $netAmount + $outstandingBreakdown['total'],
-            'totalDueFormatted' => $this->formatRupiah($netAmount + $outstandingBreakdown['total']),
+            'totalDue' => $remainingAmount + $outstandingBreakdown['total'],
+            'totalDueFormatted' => $this->formatRupiah($remainingAmount + $outstandingBreakdown['total']),
             'days' => $bill->days
                 ->map(fn (CateringUnitBillDay $day): array => [
                     'date' => $this->formatIndonesianDate(CarbonImmutable::parse($day->attendance_date)),
@@ -143,6 +157,7 @@ class CateringUnitInvoiceService
                     });
             })
             ->withSum('payments', 'amount')
+            ->withSum('creditAllocations', 'amount')
             ->orderBy('period_year')
             ->orderBy('period_month')
             ->orderBy('id')
@@ -152,9 +167,10 @@ class CateringUnitInvoiceService
             ->map(function (CateringUnitBill $priorBill): array {
                 $priorBill = $this->billingService->ensureNetAmount($priorBill);
                 $paidAmount = (int) ($priorBill->payments_sum_amount ?? 0);
+                $creditAppliedAmount = (int) ($priorBill->credit_allocations_sum_amount ?? 0);
                 $billed = (int) ($priorBill->net_amount ?? $priorBill->gross_amount);
                 $billed = $billed > 0 ? $billed : max(0, (int) $priorBill->gross_amount - (int) ($priorBill->total_subsidy_amount ?? 0));
-                $remainingAmount = max(0, $billed - $paidAmount);
+                $remainingAmount = max(0, $billed - $paidAmount - $creditAppliedAmount);
 
                 return [
                     'month' => $priorBill->period_month,

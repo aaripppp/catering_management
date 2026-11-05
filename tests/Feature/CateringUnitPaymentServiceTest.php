@@ -5,6 +5,7 @@ use App\Models\CateringCredit;
 use App\Models\CateringEmployeeUnit;
 use App\Models\CateringUnitAttendance;
 use App\Models\CateringUnitBill;
+use App\Models\CateringUnitCredit;
 use App\Models\CateringUnitPayment;
 use App\Models\User;
 use App\Services\CateringUnitBillingService;
@@ -103,7 +104,7 @@ it('reports a fully paid bill across multiple payments', function () {
         ->and($summary['status_label'])->toBe('Lunas');
 });
 
-it('reports an overpaid bill without creating a unit credit', function () {
+it('reports an overpaid bill and creates a separate unit credit', function () {
     $bill = unitPaymentSyncedBill(1_000_000);
     unitPaymentRecord($bill, 1_100_000);
 
@@ -115,6 +116,8 @@ it('reports an overpaid bill without creating a unit credit', function () {
         ->and($summary['status'])->toBe(CateringUnitBillPaymentStatus::Overpaid)
         ->and($summary['status_label'])->toBe('Lebih Bayar')
         ->and(CateringCredit::count())->toBe(0)
+        ->and(CateringUnitCredit::query()->value('original_amount'))->toBe(100_000)
+        ->and(CateringUnitCredit::query()->value('remaining_amount'))->toBe(100_000)
         ->and(CateringUnitPayment::count())->toBe(1);
 });
 
@@ -252,7 +255,7 @@ it('keeps period overpayment separate from another unit outstanding balance', fu
     $summary = unitPaymentService()->periodSummary(10, 2026);
 
     expect($summary['total_billed'])->toBe(2000)
-        ->and($summary['total_paid'])->toBe(1700)
+        ->and($summary['total_paid'])->toBe(1500)
         ->and($summary['total_remaining'])->toBe(500)
         ->and($summary['total_overpaid'])->toBe(200);
 });
@@ -279,7 +282,7 @@ it('aggregates exact unit payment statuses without treating overpayment as paid'
 
     expect($summary)->toBe([
         'total_billed' => 4000,
-        'total_paid' => 2600,
+        'total_paid' => 2400,
         'total_remaining' => 1600,
         'total_overpaid' => 200,
         'paid_count' => 1,

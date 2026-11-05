@@ -4,9 +4,11 @@ use App\Livewire\CateringUnitBills\Index as CateringUnitBillsIndex;
 use App\Models\CateringEmployeeUnit;
 use App\Models\CateringUnitAttendance;
 use App\Models\CateringUnitBill;
+use App\Models\CateringUnitCredit;
 use App\Models\CateringUnitPayment;
 use App\Models\User;
 use App\Services\CateringUnitBillingService;
+use App\Services\CateringUnitPaymentService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -44,13 +46,13 @@ function unitPaymentPagePayment(
     ?string $method = null,
     ?string $note = null,
 ): CateringUnitPayment {
-    return CateringUnitPayment::factory()->create([
-        'catering_unit_bill_id' => $bill->id,
-        'amount' => $amount,
-        'paid_at' => CarbonImmutable::parse($paidAt),
-        'payment_method' => $method,
-        'note' => $note,
-    ]);
+    return app(CateringUnitPaymentService::class)->create(
+        bill: $bill,
+        amount: $amount,
+        note: $note,
+        paidAt: CarbonImmutable::parse($paidAt),
+        paymentMethod: $method,
+    );
 }
 
 function openUnitPaymentPage(User $admin, int $month = 10, int $year = 2026): Testable
@@ -92,7 +94,7 @@ it('shows a fully paid unit bill', function () {
         ->assertSee('Rp 0');
 });
 
-it('shows an overpaid unit bill without creating a credit', function () {
+it('shows an overpaid unit bill and creates a separate unit credit', function () {
     $bill = unitPaymentPageSyncedBill(1_000_000);
     unitPaymentPagePayment($bill, 1_100_000);
 
@@ -101,7 +103,8 @@ it('shows an overpaid unit bill without creating a credit', function () {
         ->assertSee('Rp 100.000')
         ->assertSee('Rp 0');
 
-    expect(DB::table('catering_credits')->count())->toBe(0);
+    expect(DB::table('catering_credits')->count())->toBe(0)
+        ->and(CateringUnitCredit::query()->value('original_amount'))->toBe(100_000);
 });
 
 it('records a payment from the modal and refreshes the table, cards and history', function () {
@@ -278,7 +281,7 @@ it('builds period summary cards without netting one unit overpayment against ano
     openUnitPaymentPage(User::factory()->admin()->create())
         ->assertSeeInOrder([
             'Total Tagihan', 'Rp 2.000',
-            'Total Terbayar', 'Rp 1.700',
+            'Total Terbayar', 'Rp 1.500',
             'Total Tunggakan', 'Rp 500',
             'Total Lebih Bayar', 'Rp 200',
         ])

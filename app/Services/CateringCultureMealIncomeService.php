@@ -84,6 +84,25 @@ class CateringCultureMealIncomeService
             ->sum('amount');
     }
 
+    /**
+     * @return array{total: int, transaction_count: int}
+     */
+    public function monthlySummary(int $month, int $year): array
+    {
+        [$start, $end] = $this->monthBounds($month, $year);
+        $row = CateringCultureMealIncome::query()
+            ->where('income_date', '>=', $start)
+            ->where('income_date', '<', $end)
+            ->selectRaw('COALESCE(SUM(amount), 0) as total')
+            ->selectRaw('COUNT(*) as transaction_count')
+            ->first();
+
+        return [
+            'total' => (int) ($row?->total ?? 0),
+            'transaction_count' => (int) ($row?->transaction_count ?? 0),
+        ];
+    }
+
     private function resolveClass(int $schoolClassId): SchoolClass
     {
         return SchoolClass::query()->findOrFail($schoolClassId);

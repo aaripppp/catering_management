@@ -156,6 +156,7 @@ it('summarizes monthly bill cash credit outstanding overpayment and statuses sep
         'money_in' => 1200000,
         'credit_used' => 100000,
         'paid_amount' => 1300000,
+        'recognized_paid_amount' => 1200000,
         'outstanding_amount' => 600000,
         'overpayment_amount' => 100000,
         'paid_count' => 3,
@@ -312,7 +313,7 @@ it('renders header actions above filters summary and exactly three report tabs',
         ->assertSee('Rekap tagihan dan pembayaran catering per periode.')
         ->assertSeeInOrder(['Ringkasan', 'Rekap Per Kelas', 'Detail Pembayaran'])
         ->assertSee('Rp 1.800.000')
-        ->assertSee('Rp 1.300.000')
+        ->assertSee('Rp 1.200.000')
         ->assertSee('Rp 100.000')
         ->assertSee('Rp 600.000')
         ->assertSee('Statistik Pembayaran Siswa')

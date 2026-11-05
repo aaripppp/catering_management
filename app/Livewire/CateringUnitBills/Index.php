@@ -5,6 +5,7 @@ namespace App\Livewire\CateringUnitBills;
 use App\Enums\CateringUnitBillPaymentStatus;
 use App\Enums\CateringUnitBillSyncStatus;
 use App\Models\CateringUnitBill;
+use App\Models\CateringUnitCreditAllocation;
 use App\Models\CateringUnitPayment;
 use App\Services\CateringUnitBillingService;
 use App\Services\CateringUnitPaymentService;
@@ -406,6 +407,8 @@ class Index extends Component
      * @return array<int, array{
      *     billed_amount: int,
      *     paid_amount: int,
+     *     credit_applied_amount: int,
+     *     recognized_paid_amount: int,
      *     remaining_amount: int,
      *     overpaid_amount: int,
      *     status: CateringUnitBillPaymentStatus,
@@ -421,11 +424,19 @@ class Index extends Component
                 ->selectRaw('catering_unit_bill_id, SUM(amount) as total_amount')
                 ->groupBy('catering_unit_bill_id')
                 ->pluck('total_amount', 'catering_unit_bill_id');
+        $creditTotals = $bills->isEmpty()
+            ? collect()
+            : CateringUnitCreditAllocation::query()
+                ->whereIn('catering_unit_bill_id', $bills->pluck('id'))
+                ->selectRaw('catering_unit_bill_id, SUM(amount) as total_amount')
+                ->groupBy('catering_unit_bill_id')
+                ->pluck('total_amount', 'catering_unit_bill_id');
 
         $summaries = [];
 
         foreach ($bills as $bill) {
             $bill->setAttribute('payments_sum_amount', (int) ($paidTotals[$bill->id] ?? 0));
+            $bill->setAttribute('credit_allocations_sum_amount', (int) ($creditTotals[$bill->id] ?? 0));
             $summaries[$bill->id] = $paymentService->summaryForBill($bill);
         }
 

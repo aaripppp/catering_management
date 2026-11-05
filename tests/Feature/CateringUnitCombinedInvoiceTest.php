@@ -135,6 +135,10 @@ it('builds a combined invoice from synchronized unit bill snapshots', function (
             'priceLabel' => 'Rp 13.000',
             'grossAmount' => 130000,
             'grossAmountFormatted' => 'Rp 130.000',
+            'totalSubsidyAmount' => 0,
+            'totalSubsidyAmountFormatted' => 'Rp 0',
+            'netAmount' => 130000,
+            'netAmountFormatted' => 'Rp 130.000',
         ],
         [
             'no' => 2,
@@ -145,6 +149,10 @@ it('builds a combined invoice from synchronized unit bill snapshots', function (
             'priceLabel' => 'Rp 14.000',
             'grossAmount' => 112000,
             'grossAmountFormatted' => 'Rp 112.000',
+            'totalSubsidyAmount' => 0,
+            'totalSubsidyAmountFormatted' => 'Rp 0',
+            'netAmount' => 112000,
+            'netAmountFormatted' => 'Rp 112.000',
         ],
         [
             'no' => 3,
@@ -155,6 +163,10 @@ it('builds a combined invoice from synchronized unit bill snapshots', function (
             'priceLabel' => 'Rp 15.000',
             'grossAmount' => 180000,
             'grossAmountFormatted' => 'Rp 180.000',
+            'totalSubsidyAmount' => 0,
+            'totalSubsidyAmountFormatted' => 'Rp 0',
+            'netAmount' => 180000,
+            'netAmountFormatted' => 'Rp 180.000',
         ],
     ])->and($invoice)->not->toHaveKeys(['priorOutstandingRows', 'totalOutstanding', 'totalDue'])
         ->and($invoice['logoDataUri'])->toStartWith('data:image/png;base64,');

@@ -14,6 +14,10 @@ use InvalidArgumentException;
 
 class CateringUnitBillingService
 {
+    public function __construct(
+        private readonly CateringUnitFinancialReconciliationService $financialReconciliation,
+    ) {}
+
     /**
      * @param array{
      *   employee_subsidy_enabled?: bool,
@@ -25,35 +29,52 @@ class CateringUnitBillingService
      */
     public function updateSubsidy(CateringUnitBill $bill, array $subsidy): CateringUnitBill
     {
-        $bill = CateringUnitBill::query()->lockForUpdate()->findOrFail($bill->id);
+        return DB::transaction(function () use ($bill, $subsidy): CateringUnitBill {
+            $unitId = (int) CateringUnitBill::query()
+                ->whereKey($bill->id)
+                ->value('catering_employee_unit_id');
 
-        $employeeEnabled = (bool) ($subsidy['employee_subsidy_enabled'] ?? false);
-        $employeeRate = max(0, (int) ($subsidy['employee_subsidy_rate'] ?? 0));
-        $employeeQty = (int) $bill->total_quantity;
-        $employeeAmount = $employeeEnabled ? ($employeeQty * $employeeRate) : 0;
+            CateringEmployeeUnit::query()
+                ->whereKey($unitId)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $lockedBill = CateringUnitBill::query()->lockForUpdate()->findOrFail($bill->id);
 
-        $studentEnabled = (bool) ($subsidy['student_subsidy_enabled'] ?? false);
-        $studentQty = max(0, (int) ($subsidy['student_subsidy_qty'] ?? 0));
-        $studentRate = max(0, (int) ($subsidy['student_subsidy_rate'] ?? 0));
-        $studentAmount = $studentEnabled ? ($studentQty * $studentRate) : 0;
+            $employeeEnabled = (bool) ($subsidy['employee_subsidy_enabled'] ?? false);
+            $employeeRate = max(0, (int) ($subsidy['employee_subsidy_rate'] ?? 0));
+            $employeeQty = (int) $lockedBill->total_quantity;
+            $employeeAmount = $employeeEnabled ? ($employeeQty * $employeeRate) : 0;
 
-        $totalSubsidy = $employeeAmount + $studentAmount;
-        $netAmount = max(0, (int) $bill->gross_amount - $totalSubsidy);
+            $studentEnabled = (bool) ($subsidy['student_subsidy_enabled'] ?? false);
+            $studentQty = max(0, (int) ($subsidy['student_subsidy_qty'] ?? 0));
+            $studentRate = max(0, (int) ($subsidy['student_subsidy_rate'] ?? 0));
+            $studentAmount = $studentEnabled ? ($studentQty * $studentRate) : 0;
 
-        $bill->update([
-            'employee_subsidy_enabled' => $employeeEnabled,
-            'employee_subsidy_qty' => $employeeQty,
-            'employee_subsidy_rate' => $employeeRate,
-            'employee_subsidy_amount' => $employeeAmount,
-            'student_subsidy_enabled' => $studentEnabled,
-            'student_subsidy_qty' => $studentQty,
-            'student_subsidy_rate' => $studentRate,
-            'student_subsidy_amount' => $studentAmount,
-            'total_subsidy_amount' => $totalSubsidy,
-            'net_amount' => $netAmount,
-        ]);
+            $totalSubsidy = $employeeAmount + $studentAmount;
+            $netAmount = max(0, (int) $lockedBill->gross_amount - $totalSubsidy);
 
-        return $bill->fresh();
+            $lockedBill->update([
+                'employee_subsidy_enabled' => $employeeEnabled,
+                'employee_subsidy_qty' => $employeeQty,
+                'employee_subsidy_rate' => $employeeRate,
+                'employee_subsidy_amount' => $employeeAmount,
+                'student_subsidy_enabled' => $studentEnabled,
+                'student_subsidy_qty' => $studentQty,
+                'student_subsidy_rate' => $studentRate,
+                'student_subsidy_amount' => $studentAmount,
+                'total_subsidy_amount' => $totalSubsidy,
+                'net_amount' => $netAmount,
+            ]);
+
+            $this->financialReconciliation->clearDerivedStateForLockedUnits([
+                (int) $lockedBill->catering_employee_unit_id,
+            ]);
+            $this->financialReconciliation->rebuildLockedUnits([
+                (int) $lockedBill->catering_employee_unit_id,
+            ]);
+
+            return $lockedBill->fresh();
+        }, attempts: 5);
     }
 
     public function ensureNetAmount(CateringUnitBill $bill): CateringUnitBill
@@ -380,6 +401,10 @@ class CateringUnitBillingService
                     CateringUnitBill::query()->whereKey($update['id'])->update(array_merge($update, ['updated_at' => $now]));
                 }
             }
+
+            $affectedUnitIds = array_map('intval', array_keys($linesByUnit));
+            $this->financialReconciliation->clearDerivedStateForLockedUnits($affectedUnitIds);
+            $this->financialReconciliation->rebuildLockedUnits($affectedUnitIds);
 
             return CateringUnitBill::query()
                 ->with(['days' => fn ($query) => $query->orderBy('attendance_date')])

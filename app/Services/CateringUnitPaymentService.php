@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\CateringUnitBillPaymentStatus;
 use App\Enums\CateringUnitBillSyncStatus;
+use App\Models\CateringEmployeeUnit;
 use App\Models\CateringUnitBill;
 use App\Models\CateringUnitPayment;
 use App\Models\User;
@@ -23,7 +24,10 @@ use Illuminate\Validation\ValidationException;
  */
 class CateringUnitPaymentService
 {
-    public function __construct(private CateringUnitBillingService $billingService) {}
+    public function __construct(
+        private CateringUnitBillingService $billingService,
+        private CateringUnitFinancialReconciliationService $financialReconciliation,
+    ) {}
 
     /**
      * New payments are only accepted against a synchronized bill, so the admin
@@ -42,6 +46,10 @@ class CateringUnitPaymentService
         $this->ensureBillIsSynchronized($bill);
 
         return DB::transaction(function () use ($bill, $amount, $actor, $note, $paidAt, $paymentMethod): CateringUnitPayment {
+            CateringEmployeeUnit::query()
+                ->whereKey($bill->catering_employee_unit_id)
+                ->lockForUpdate()
+                ->firstOrFail();
             $lockedBill = CateringUnitBill::query()->lockForUpdate()->findOrFail($bill->id);
 
             $net = (int) ($lockedBill->net_amount ?? $lockedBill->gross_amount);
@@ -53,13 +61,22 @@ class CateringUnitPaymentService
                 ]);
             }
 
-            return $lockedBill->payments()->create([
+            $payment = $lockedBill->payments()->create([
                 'amount' => $amount,
                 'paid_at' => $paidAt ?? now(),
                 'payment_method' => $paymentMethod,
                 'note' => $note,
                 'created_by' => $actor?->id,
             ]);
+
+            $this->financialReconciliation->clearDerivedStateForLockedUnits([
+                (int) $lockedBill->catering_employee_unit_id,
+            ]);
+            $this->financialReconciliation->rebuildLockedUnits([
+                (int) $lockedBill->catering_employee_unit_id,
+            ]);
+
+            return $payment;
         }, attempts: 5);
     }
 
@@ -73,6 +90,9 @@ class CateringUnitPaymentService
         $this->validateAmount($amount);
 
         return DB::transaction(function () use ($payment, $amount, $paidAt, $note, $paymentMethod): CateringUnitPayment {
+            $unitId = $this->unitIdForPayment($payment);
+
+            CateringEmployeeUnit::query()->whereKey($unitId)->lockForUpdate()->firstOrFail();
             $lockedPayment = CateringUnitPayment::query()->lockForUpdate()->findOrFail($payment->id);
             $lockedPayment->update([
                 'amount' => $amount,
@@ -81,6 +101,9 @@ class CateringUnitPaymentService
                 'note' => $note,
             ]);
 
+            $this->financialReconciliation->clearDerivedStateForLockedUnits([$unitId]);
+            $this->financialReconciliation->rebuildLockedUnits([$unitId]);
+
             return $lockedPayment->fresh(['creator']);
         }, attempts: 5);
     }
@@ -88,8 +111,13 @@ class CateringUnitPaymentService
     public function delete(CateringUnitPayment $payment): void
     {
         DB::transaction(function () use ($payment): void {
+            $unitId = $this->unitIdForPayment($payment);
+
+            CateringEmployeeUnit::query()->whereKey($unitId)->lockForUpdate()->firstOrFail();
             $lockedPayment = CateringUnitPayment::query()->lockForUpdate()->findOrFail($payment->id);
+            $this->financialReconciliation->clearDerivedStateForLockedUnits([$unitId]);
             $lockedPayment->delete();
+            $this->financialReconciliation->rebuildLockedUnits([$unitId]);
         }, attempts: 5);
     }
 
@@ -97,6 +125,8 @@ class CateringUnitPaymentService
      * @return array{
      *     billed_amount: int,
      *     paid_amount: int,
+     *     credit_applied_amount: int,
+     *     recognized_paid_amount: int,
      *     remaining_amount: int,
      *     overpaid_amount: int,
      *     status: CateringUnitBillPaymentStatus,
@@ -105,23 +135,23 @@ class CateringUnitPaymentService
      */
     public function summaryForBill(CateringUnitBill $bill): array
     {
-        $attrs = $bill->getAttributes();
-        if (array_key_exists('net_amount', $attrs) && $attrs['net_amount'] !== null) {
-            $billedAmount = (int) $attrs['net_amount'];
-        } else {
-            $billedAmount = (int) ($bill->net_amount ?? 0);
-        }
+        $billedAmount = $bill->billedAmount();
 
         if ($billedAmount === 0) {
             $billedAmount = max(0, (int) $bill->gross_amount - (int) ($bill->total_subsidy_amount ?? 0));
         }
 
-        return $this->summarize($billedAmount, $this->paidAmountFor($bill));
+        return $this->summarize(
+            $billedAmount,
+            $this->paidAmountFor($bill),
+            $this->creditAppliedFor($bill),
+        );
     }
 
     /**
-     * Period totals keep each bill's overpayment separate, so an overpaid unit
-     * never silently covers another unit's outstanding balance.
+     * Credit applied to later bills reduces their outstanding balance, while a
+     * source bill's overpayment is reported separately and never counted as
+     * recognized settlement for that same bill.
      *
      * @return array{
      *     total_billed: int,
@@ -139,23 +169,31 @@ class CateringUnitPaymentService
             ->select('catering_unit_bill_id')
             ->selectRaw('SUM(amount) as paid_amount')
             ->groupBy('catering_unit_bill_id');
+        $creditTotals = DB::table('catering_unit_credit_allocations')
+            ->select('catering_unit_bill_id')
+            ->selectRaw('SUM(amount) as credit_applied_amount')
+            ->groupBy('catering_unit_bill_id');
         $periodBills = DB::table('catering_unit_bills')
             ->leftJoinSub($paymentTotals, 'payment_totals', function (JoinClause $join): void {
                 $join->on('catering_unit_bills.id', '=', 'payment_totals.catering_unit_bill_id');
             })
+            ->leftJoinSub($creditTotals, 'credit_totals', function (JoinClause $join): void {
+                $join->on('catering_unit_bills.id', '=', 'credit_totals.catering_unit_bill_id');
+            })
             ->where('catering_unit_bills.period_month', $month)
             ->where('catering_unit_bills.period_year', $year)
             ->selectRaw('COALESCE(catering_unit_bills.net_amount, catering_unit_bills.gross_amount) as billed_amount')
-            ->selectRaw('COALESCE(payment_totals.paid_amount, 0) as paid_amount');
+            ->selectRaw('COALESCE(payment_totals.paid_amount, 0) as paid_amount')
+            ->selectRaw('COALESCE(credit_totals.credit_applied_amount, 0) as credit_applied_amount');
         $summary = DB::query()
             ->fromSub($periodBills, 'period_bills')
             ->selectRaw('COALESCE(SUM(billed_amount), 0) as total_billed')
-            ->selectRaw('COALESCE(SUM(paid_amount), 0) as total_paid')
-            ->selectRaw('COALESCE(SUM(CASE WHEN billed_amount > paid_amount THEN billed_amount - paid_amount ELSE 0 END), 0) as total_remaining')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > billed_amount THEN paid_amount - billed_amount ELSE 0 END), 0) as total_overpaid')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = billed_amount THEN 1 ELSE 0 END), 0) as paid_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount > 0 AND paid_amount < billed_amount THEN 1 ELSE 0 END), 0) as partial_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount = 0 AND billed_amount > 0 THEN 1 ELSE 0 END), 0) as unpaid_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount + credit_applied_amount >= billed_amount THEN billed_amount ELSE paid_amount + credit_applied_amount END), 0) as total_paid')
+            ->selectRaw('COALESCE(SUM(CASE WHEN billed_amount > paid_amount + credit_applied_amount THEN billed_amount - paid_amount - credit_applied_amount ELSE 0 END), 0) as total_remaining')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount + credit_applied_amount > billed_amount THEN paid_amount + credit_applied_amount - billed_amount ELSE 0 END), 0) as total_overpaid')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount + credit_applied_amount = billed_amount THEN 1 ELSE 0 END), 0) as paid_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount + credit_applied_amount > 0 AND paid_amount + credit_applied_amount < billed_amount THEN 1 ELSE 0 END), 0) as partial_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN paid_amount + credit_applied_amount = 0 AND billed_amount > 0 THEN 1 ELSE 0 END), 0) as unpaid_count')
             ->first();
 
         return [
@@ -197,33 +235,57 @@ class CateringUnitPaymentService
             : (int) $bill->payments()->sum('amount');
     }
 
+    private function creditAppliedFor(CateringUnitBill $bill): int
+    {
+        $attributes = $bill->getAttributes();
+
+        return array_key_exists('credit_allocations_sum_amount', $attributes)
+            ? (int) $attributes['credit_allocations_sum_amount']
+            : (int) $bill->creditAllocations()->sum('amount');
+    }
+
+    private function unitIdForPayment(CateringUnitPayment $payment): int
+    {
+        $billId = CateringUnitPayment::query()->whereKey($payment->id)->value('catering_unit_bill_id');
+
+        return (int) CateringUnitBill::query()->whereKey($billId)->value('catering_employee_unit_id');
+    }
+
     /**
      * @return array{
      *     billed_amount: int,
      *     paid_amount: int,
+     *     credit_applied_amount: int,
+     *     recognized_paid_amount: int,
      *     remaining_amount: int,
      *     overpaid_amount: int,
      *     status: CateringUnitBillPaymentStatus,
      *     status_label: string
      * }
      */
-    private function summarize(int $billedAmount, int $paidAmount): array
+    private function summarize(int $billedAmount, int $paidAmount, int $creditApplied): array
     {
-        $status = $this->statusFor($billedAmount, $paidAmount);
+        $status = $this->statusFor($billedAmount, $paidAmount, $creditApplied);
+        $recognizedPaid = min($billedAmount, $paidAmount + $creditApplied);
 
         return [
             'billed_amount' => $billedAmount,
             'paid_amount' => $paidAmount,
-            'remaining_amount' => max(0, $billedAmount - $paidAmount),
-            'overpaid_amount' => max(0, $paidAmount - $billedAmount),
+            'credit_applied_amount' => $creditApplied,
+            'recognized_paid_amount' => $recognizedPaid,
+            'remaining_amount' => max(0, $billedAmount - $paidAmount - $creditApplied),
+            'overpaid_amount' => max(0, $paidAmount + $creditApplied - $billedAmount),
             'status' => $status,
             'status_label' => $status->label(),
         ];
     }
 
-    private function statusFor(int $billedAmount, int $paidAmount): CateringUnitBillPaymentStatus
-    {
-        if ($paidAmount > $billedAmount) {
+    private function statusFor(
+        int $billedAmount,
+        int $paidAmount,
+        int $creditApplied = 0,
+    ): CateringUnitBillPaymentStatus {
+        if ($paidAmount + $creditApplied > $billedAmount) {
             return CateringUnitBillPaymentStatus::Overpaid;
         }
 
@@ -231,11 +293,13 @@ class CateringUnitPaymentService
             return CateringUnitBillPaymentStatus::Paid;
         }
 
-        if ($paidAmount === 0) {
+        $recognizedPaid = min($billedAmount, $paidAmount + $creditApplied);
+
+        if ($recognizedPaid === 0) {
             return CateringUnitBillPaymentStatus::Unpaid;
         }
 
-        if ($paidAmount < $billedAmount) {
+        if ($recognizedPaid < $billedAmount) {
             return CateringUnitBillPaymentStatus::Partial;
         }
 

@@ -176,6 +176,31 @@ it('renders a real inline pdf with branding and snapshot totals', function () {
         ->and($queryCount)->toBeLessThanOrEqual(10);
 });
 
+it('shows prior credit and cash separately from the current unit balance', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['name' => 'SD']);
+    $sourceBill = createPriorUnitInvoiceBill($unit, 9, 2026, 100000);
+    payPriorUnitInvoiceBill($sourceBill, 150000);
+    $currentBill = createSynchronizedUnitInvoiceBill($unit);
+    payPriorUnitInvoiceBill($currentBill, 100000);
+
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($currentBill);
+    $html = view('pdf.catering.unit-invoice', $invoice)->render();
+
+    expect($invoice)->toMatchArray([
+        'billedAmount' => 308000,
+        'creditAppliedAmount' => 50000,
+        'cashPaidAmount' => 100000,
+        'recognizedPaidAmount' => 150000,
+        'remainingAmount' => 158000,
+        'totalDue' => 158000,
+    ]);
+    expect($html)->toContain('Tagihan Bersih')
+        ->toContain('Kredit Periode Sebelumnya')
+        ->toContain('Pembayaran Tunai')
+        ->toContain('Sisa Tagihan Bulan Ini')
+        ->toContain('Rp 158.000');
+});
+
 it('shows prior unit balances oldest first using each bills remaining amount', function () {
     $unit = CateringEmployeeUnit::factory()->create(['name' => 'SD']);
     $augustBill = createPriorUnitInvoiceBill($unit, 8, 2026, 600000);
@@ -228,9 +253,9 @@ it('excludes paid overpaid zero and current unit bills from prior outstanding', 
 
     expect($zeroBill->gross_amount)->toBe(0)
         ->and(array_column($invoice['priorOutstandingRows'], 'periodLabel'))->toBe(['September 2026'])
-        ->and(array_column($invoice['priorOutstandingRows'], 'remainingAmount'))->toBe([150000])
-        ->and($invoice['totalOutstanding'])->toBe(150000)
-        ->and($invoice['totalDue'])->toBe(458000);
+        ->and(array_column($invoice['priorOutstandingRows'], 'remainingAmount'))->toBe([125000])
+        ->and($invoice['totalOutstanding'])->toBe(125000)
+        ->and($invoice['totalDue'])->toBe(333000);
 });
 
 it('orders prior unit outstanding across a year boundary', function () {

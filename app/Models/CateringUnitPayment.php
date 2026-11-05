@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'catering_unit_bill_id',
@@ -40,5 +41,11 @@ class CateringUnitPayment extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /** @return HasOne<CateringUnitCredit, $this> */
+    public function generatedCredit(): HasOne
+    {
+        return $this->hasOne(CateringUnitCredit::class, 'source_unit_payment_id');
     }
 }

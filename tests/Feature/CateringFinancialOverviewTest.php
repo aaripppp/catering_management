@@ -165,12 +165,13 @@ it('combines student unit and culture values without netting overpayments or leg
     expect($overview)->toBe([
         'student' => [
             'billed' => 2000,
-            'paid' => 1700,
+            'paid' => 1500,
             'remaining' => 500,
+            'overpaid' => 200,
         ],
         'unit' => [
             'billed' => 2000,
-            'paid' => 1700,
+            'paid' => 1500,
             'remaining' => 500,
             'overpaid' => 200,
             'paid_count' => 0,
@@ -180,49 +181,158 @@ it('combines student unit and culture values without netting overpayments or leg
             'stale_count' => 1,
         ],
         'culture' => [
-            'recorded_count' => 10,
-            'price' => 100,
-            'billed' => 1000,
             'income' => 1200,
-            'difference' => -200,
+            'transaction_count' => 1,
+            'period_label' => 'Oktober 2026',
         ],
         'total' => [
-            'billed' => 5000,
-            'paid' => 4600,
+            'billed' => 4000,
+            'paid' => 4200,
             'uncovered_difference' => 1000,
         ],
     ]);
 
     expect(CateringUnitBill::query()->where('catering_employee_unit_id', $unsyncedUnit->id)->exists())->toBeFalse();
+
+    expect($overview['total']['billed'])->toBe($overview['student']['billed'] + $overview['unit']['billed'])
+        ->and($overview['total']['paid'])->toBe($overview['student']['paid'] + $overview['unit']['paid'] + $overview['culture']['income'])
+        ->and($overview['total']['uncovered_difference'])->toBe($overview['student']['remaining'] + $overview['unit']['remaining']);
 });
 
-it('uses the current culture price when reporting a historical period', function () {
+it('shows recognized student settlement while keeping overpayment as a separate carry-forward', function () {
+    $schoolClass = SchoolClass::factory()->create();
+    $category = CateringCategory::factory()->student()->create();
+    $overpaidMember = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $underpaidMember = CateringMember::factory()->create([
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $overpaidBill = CateringBill::factory()->create([
+        'catering_member_id' => $overpaidMember->id,
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+        'period_month' => 10,
+        'period_year' => 2026,
+        'gross_amount' => 1000000,
+    ]);
+    $underpaidBill = CateringBill::factory()->create([
+        'catering_member_id' => $underpaidMember->id,
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+        'period_month' => 10,
+        'period_year' => 2026,
+        'gross_amount' => 800000,
+    ]);
+    $paymentService = app(CateringPaymentService::class);
+    $paymentService->record($overpaidBill, 1100000);
+    $paymentService->record($underpaidBill, 200000);
+
+    $summary = app(CateringMonthlyReportService::class)->summary([
+        'month' => 10,
+        'year' => 2026,
+        'participantGroup' => CateringParticipantGroup::Student->value,
+        'jenjang' => '',
+        'schoolClassId' => '',
+    ]);
+    $overview = app(CateringMonthlyReportService::class)->financialOverview(10, 2026);
+
+    expect($overview['student'])->toBe([
+        'billed' => 1800000,
+        'paid' => 1200000,
+        'remaining' => 600000,
+        'overpaid' => 100000,
+    ])->and($summary)->toMatchArray([
+        'gross_amount' => 1800000,
+        'paid_amount' => 1300000,
+        'outstanding_amount' => 600000,
+        'overpayment_amount' => 100000,
+    ])->and($overview['student']['billed'] - $overview['student']['paid'])->toBe($overview['student']['remaining']);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertSee('Pembayaran yang menutup tagihan')
+        ->assertSee('Lebih bayar bulan ini: Rp 100.000')
+        ->assertSee('Rp 1.200.000');
+});
+
+it('hides the overpayment helper when the selected period has no overpayment', function () {
+    $bill = CateringBill::factory()->create([
+        'period_month' => 10,
+        'period_year' => 2026,
+        'gross_amount' => 1000000,
+    ]);
+    app(CateringPaymentService::class)->record($bill, 600000);
+
+    $overview = app(CateringMonthlyReportService::class)->financialOverview(10, 2026);
+
+    expect($overview['student'])->toBe([
+        'billed' => 1000000,
+        'paid' => 600000,
+        'remaining' => 400000,
+        'overpaid' => 0,
+    ]);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertDontSee('Lebih bayar bulan ini');
+});
+
+it('shows recognized unit settlement while keeping overpayment as a separate carry-forward', function () {
+    ['bill' => $bill] = financialOverviewSyncedUnitBill('Unit Lebih Bayar');
+    CateringUnitPayment::factory()->create([
+        'catering_unit_bill_id' => $bill->id,
+        'amount' => 1100,
+    ]);
+
+    $overview = app(CateringMonthlyReportService::class)->financialOverview(10, 2026);
+
+    expect($overview['unit'])->toMatchArray([
+        'billed' => 1000,
+        'paid' => 1000,
+        'remaining' => 0,
+        'overpaid' => 100,
+    ])->and($overview['unit']['billed'] - $overview['unit']['paid'])->toBe($overview['unit']['remaining']);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringMonthlyReport::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertSee('Pembayaran yang menutup tagihan')
+        ->assertSee('Lebih bayar bulan ini: Rp 100');
+});
+
+it('reports manual culture meal income independently from attendance and price', function () {
     financialOverviewCultureAttendance(1, month: 9);
     $settingService = app(CateringCultureMealSettingService::class);
     $settingService->updateCultureMealPrice(16000);
+    CateringCultureMealIncome::factory()->create([
+        'income_date' => '2026-09-10',
+        'amount' => 5000,
+    ]);
 
     $firstOverview = app(CateringMonthlyReportService::class)->financialOverview(9, 2026);
     $settingService->updateCultureMealPrice(18000);
     $secondOverview = app(CateringMonthlyReportService::class)->financialOverview(9, 2026);
 
-    expect($firstOverview['culture'])->toMatchArray([
-        'recorded_count' => 1,
-        'price' => 16000,
-        'billed' => 16000,
-        'difference' => 16000,
-    ])->and($secondOverview['culture'])->toMatchArray([
-        'recorded_count' => 1,
-        'price' => 18000,
-        'billed' => 18000,
-        'difference' => 18000,
-    ]);
+    expect($firstOverview['culture'])->toBe([
+        'income' => 5000,
+        'transaction_count' => 1,
+        'period_label' => 'September 2026',
+    ])->and($secondOverview['culture'])->toBe($firstOverview['culture']);
 });
 
 it('returns a complete zero overview for an empty period', function () {
     $overview = app(CateringMonthlyReportService::class)->financialOverview(2, 2026);
 
     expect($overview)->toBe([
-        'student' => ['billed' => 0, 'paid' => 0, 'remaining' => 0],
+        'student' => ['billed' => 0, 'paid' => 0, 'remaining' => 0, 'overpaid' => 0],
         'unit' => [
             'billed' => 0,
             'paid' => 0,
@@ -235,11 +345,9 @@ it('returns a complete zero overview for an empty period', function () {
             'stale_count' => 0,
         ],
         'culture' => [
-            'recorded_count' => 0,
-            'price' => 16000,
-            'billed' => 0,
             'income' => 0,
-            'difference' => 0,
+            'transaction_count' => 0,
+            'period_label' => 'Februari 2026',
         ],
         'total' => ['billed' => 0, 'paid' => 0, 'uncovered_difference' => 0],
     ]);
@@ -268,14 +376,16 @@ it('renders four financial rows and a stale unit warning', function () {
         ->assertSee('Total Terbayar Unit')
         ->assertSee('Tunggakan Unit')
         ->assertSee('Budaya Makan')
-        ->assertSee('Tagihan Tercatat')
         ->assertSee('Pemasukan Manual')
-        ->assertSee('Selisih')
+        ->assertSee('Jumlah Transaksi')
+        ->assertSee('Periode')
+        ->assertSee('1 transaksi')
+        ->assertSee('Oktober 2026')
+        ->assertDontSee('Tagihan Tercatat')
         ->assertSee('Total Keseluruhan')
         ->assertSee('Total Semua Tagihan')
         ->assertSee('Total Semua Terbayar')
         ->assertSee('Total Selisih Belum Tertutup')
-        ->assertSee('-Rp 200')
         ->assertSee('Sebagian Tagihan Unit perlu disinkronkan. Nilai yang tampil menggunakan snapshot tagihan terakhir.');
 });
 
@@ -312,7 +422,7 @@ it('renders all four domains in separate Ringkasan blocks with authoritative val
     expect($component->html())->toContain('id="all-domain-summary" class="grid grid-cols-1 gap-4 lg:grid-cols-2"');
     expect($student)->toContain(
         'Total Tagihan Rp 2.000',
-        'Total Terbayar Rp 1.700',
+        'Total Terbayar Rp 1.500',
         'Tunggakan Rp 500',
         'Lebih Bayar Rp 200',
         'Lunas 1',
@@ -321,7 +431,7 @@ it('renders all four domains in separate Ringkasan blocks with authoritative val
     );
     expect($unit)->toContain(
         'Total Tagihan Unit Rp 4.000',
-        'Total Terbayar Unit Rp 2.600',
+        'Total Terbayar Unit Rp 2.400',
         'Tunggakan Unit Rp 1.600',
         'Lebih Bayar Unit Rp 200',
         'Unit Lunas 1',
@@ -329,24 +439,22 @@ it('renders all four domains in separate Ringkasan blocks with authoritative val
         'Unit Belum Bayar 1',
     );
     expect($culture)->toContain(
-        'Data Tercatat 10',
-        'Harga Budaya Makan Rp 16.000',
-        'Tagihan Tercatat Rp 160.000',
         'Pemasukan Manual Rp 120.000',
-        'Selisih Rp 40.000',
-    )->not->toContain('Lunas', 'Sebagian', 'Belum Bayar', 'Tunggakan');
+        'Jumlah Transaksi 1 transaksi',
+        'Periode Oktober 2026',
+    )->not->toContain('Tagihan Tercatat', 'Selisih', 'Data Tercatat', 'Harga Budaya Makan', 'Lunas', 'Sebagian', 'Belum Bayar', 'Tunggakan');
     expect($total)->toContain(
-        'Total Semua Tagihan Rp 166.000',
-        'Total Semua Terbayar Rp 124.300',
-        'Total Selisih Belum Tertutup Rp 42.100',
+        'Total Semua Tagihan Rp 6.000',
+        'Total Semua Terbayar Rp 123.900',
+        'Total Selisih Belum Tertutup Rp 2.100',
     );
 });
 
-it('renders a signed negative Budaya Makan difference in Ringkasan', function () {
+it('renders only manual income transaction count and period for Budaya Makan in Ringkasan', function () {
     financialOverviewCultureAttendance(10);
-    CateringCultureMealIncome::factory()->create([
+    CateringCultureMealIncome::factory()->count(2)->create([
         'income_date' => '2026-10-10',
-        'amount' => 200000,
+        'amount' => 75000,
     ]);
     $component = Livewire::actingAs(User::factory()->admin()->create())
         ->test(CateringMonthlyReport::class)
@@ -355,7 +463,11 @@ it('renders a signed negative Budaya Makan difference in Ringkasan', function ()
 
     $culture = financialOverviewSummaryBlockText($component, 'summary-culture');
 
-    expect($culture)->toContain('Selisih -Rp 40.000');
+    expect($culture)->toContain(
+        'Pemasukan Manual Rp 150.000',
+        'Jumlah Transaksi 2 transaksi',
+        'Periode Oktober 2026',
+    )->not->toContain('Tagihan Tercatat', 'Selisih', 'Data Tercatat', 'Harga Budaya Makan');
 });
 
 it('isolates Ringkasan student filters from Unit Budaya and global totals', function () {
@@ -429,7 +541,7 @@ it('keeps every Ringkasan domain visible with zero values for an empty period', 
 
     expect($student)->toContain('Total Tagihan Rp 0', 'Total Terbayar Rp 0', 'Lunas 0');
     expect($unit)->toContain('Total Tagihan Unit Rp 0', 'Total Terbayar Unit Rp 0', 'Unit Lunas 0');
-    expect($culture)->toContain('Data Tercatat 0', 'Harga Budaya Makan Rp 16.000', 'Selisih Rp 0');
+    expect($culture)->toContain('Pemasukan Manual Rp 0', 'Jumlah Transaksi 0 transaksi', 'Periode Februari 2026');
     expect($total)->toContain('Total Semua Tagihan Rp 0', 'Total Semua Terbayar Rp 0', 'Total Selisih Belum Tertutup Rp 0');
     expect($component->html())->not->toContain('Belum ada data laporan untuk periode/filter ini.');
 });
@@ -485,9 +597,13 @@ it('updates every domain in the overview when the period changes', function () {
         ->set('year', 2026)
         ->assertViewHas('financialOverview', fn (array $overview): bool => $overview['student']['billed'] === 2000
             && $overview['unit']['billed'] === 3000
-            && $overview['culture']['billed'] === 4000
-            && $overview['culture']['income'] === 5000
-            && $overview['total']['billed'] === 9000);
+            && $overview['culture'] === [
+                'income' => 5000,
+                'transaction_count' => 1,
+                'period_label' => 'November 2026',
+            ]
+            && $overview['total']['billed'] === 5000
+            && $overview['total']['paid'] === 5000);
 });
 
 it('loads a large cross-domain overview with a bounded query count', function () {
@@ -549,7 +665,7 @@ it('loads a large cross-domain overview with a bounded query count', function ()
 
     $overview = app(CateringMonthlyReportService::class)->financialOverview(10, 2026);
 
-    expect($overview['student'])->toBe(['billed' => 25000, 'paid' => 12500, 'remaining' => 12500])
+    expect($overview['student'])->toBe(['billed' => 25000, 'paid' => 12500, 'remaining' => 12500, 'overpaid' => 0])
         ->and($overview['unit'])->toMatchArray([
             'billed' => 25000,
             'paid' => 12500,
@@ -558,6 +674,6 @@ it('loads a large cross-domain overview with a bounded query count', function ()
             'partial_count' => 25,
             'unpaid_count' => 0,
         ])
-        ->and($overview['culture']['recorded_count'])->toBe(25)
+        ->and($overview['culture'])->toBe(['income' => 0, 'transaction_count' => 0, 'period_label' => 'Oktober 2026'])
         ->and($queries)->toBeLessThanOrEqual(12);
 });

@@ -8,6 +8,7 @@ use App\Models\CateringUnitBillDay;
 use App\Models\CateringUnitPayment;
 use App\Models\User;
 use App\Services\CateringUnitBillingService;
+use App\Services\CateringUnitFinancialReconciliationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -220,7 +221,7 @@ it('rolls back the bill header and days when daily replacement fails', function 
     $attendance = createUnitBillingAttendance($unit, '2026-10-01', 10, 13000);
     $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
     $attendance->update(['quantity' => 8]);
-    $failingService = new class extends CateringUnitBillingService
+    $failingService = new class(app(CateringUnitFinancialReconciliationService::class)) extends CateringUnitBillingService
     {
         protected function replaceBillDays(array $billIds, array $daySnapshots): void
         {
@@ -289,7 +290,7 @@ it('synchronizes and evaluates multiple units with bounded queries', function ()
         ->and($bills->every(fn (CateringUnitBill $bill): bool => $bill->total_quantity === 12))->toBeTrue()
         ->and($statuses)->toHaveCount(8)
         ->and($statuses->every(fn (array $status): bool => $status['status'] === CateringUnitBillSyncStatus::Synced))->toBeTrue()
-        ->and($syncQueryCount)->toBeLessThanOrEqual(12)
+        ->and($syncQueryCount)->toBeLessThanOrEqual(15)
         ->and($statusQueryCount)->toBeLessThanOrEqual(4);
 });
 
