@@ -23,14 +23,13 @@ class CateringInvoiceService
 {
     private ?string $logoDataUri = null;
 
-    /**
-     * Only the "ikut" status contributes to the billed catering quantity.
-     */
-    private const BILLABLE_STATUS = CateringAttendanceStatus::Ikut;
+    private ?int $cachedCultureMealBillablePrice = null;
 
     private const CLASS_INVOICE_CATEGORY = 'Siswa Umum';
 
     private const LOGO_MAX_WIDTH = 160;
+
+    public function __construct(private CateringCultureMealSettingService $cultureMealSetting) {}
 
     /**
      * @var array<int, string>
@@ -114,6 +113,7 @@ class CateringInvoiceService
             CateringAttendanceStatus::cases(),
         ), 0);
         $savedDays = 0;
+        $totalBillableDays = 0;
         $invoiceNumber = $this->classInvoiceNumber($schoolClass, $start);
 
         foreach ($members as $member) {
@@ -124,10 +124,16 @@ class CateringInvoiceService
                 ? $this->statusCounts($this->invoiceVisibleRows($memberRows))
                 : $this->billStatusCounts($bill);
             $pricePerDay = $bill?->price_per_day ?? (int) ($member->cateringCategory?->price_per_day ?? 0);
-            $total = $bill?->gross_amount ?? ($counts[self::BILLABLE_STATUS->value] * $pricePerDay);
+            $billableCultureMealDays = $bill?->billable_culture_meal_days ?? $this->billableCultureMealRowCount($this->invoiceVisibleRows($memberRows));
+            $billableCultureMealPrice = $bill?->culture_meal_billable_price
+                ?? ($billableCultureMealDays > 0 ? $this->cultureMealBillablePrice() : 0);
+            $billableDays = $bill?->billable_days ?? ($counts[CateringAttendanceStatus::Ikut->value] + $billableCultureMealDays);
+            $cultureMealBillableAmount = $bill?->culture_meal_billable_amount ?? ($billableCultureMealDays * $billableCultureMealPrice);
+            $total = $bill?->gross_amount ?? (($counts[CateringAttendanceStatus::Ikut->value] * $pricePerDay) + $cultureMealBillableAmount);
             $memberTotalDue = $total + $totalOutstanding;
 
             $savedDays += $bill?->saved_days ?? count($memberRows);
+            $totalBillableDays += $billableDays;
             $grandTotal += $total;
             $totalOutstandingTotal += $totalOutstanding;
             $totalDue += $memberTotalDue;
@@ -139,7 +145,7 @@ class CateringInvoiceService
             $rows[] = [
                 'memberId' => $member->id,
                 'memberName' => $member->name,
-                'ikut' => $counts[self::BILLABLE_STATUS->value],
+                'ikut' => $counts[CateringAttendanceStatus::Ikut->value],
                 'sakit' => $counts[CateringAttendanceStatus::Sakit->value],
                 'izin' => $counts[CateringAttendanceStatus::Izin->value],
                 'alfa' => $counts[CateringAttendanceStatus::Alfa->value],
@@ -149,8 +155,13 @@ class CateringInvoiceService
                 'puasa' => $counts[CateringAttendanceStatus::Puasa->value],
                 'libur' => $counts[CateringAttendanceStatus::Libur->value],
                 'savedDays' => $bill?->saved_days ?? count($memberRows),
+                'billableDays' => $billableDays,
+                'billableCultureMealDays' => $billableCultureMealDays,
                 'pricePerDay' => $pricePerDay,
                 'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
+                'cultureMealBillablePrice' => $billableCultureMealPrice,
+                'cultureMealBillablePriceFormatted' => $this->formatRupiah($billableCultureMealPrice),
+                'cultureMealBillableAmount' => $cultureMealBillableAmount,
                 'total' => $total,
                 'totalFormatted' => $this->formatRupiah($total),
                 'totalOutstanding' => $totalOutstanding,
@@ -198,7 +209,8 @@ class CateringInvoiceService
                 self::MONTH_NAMES[$start->month],
                 $start->year,
             ),
-            'totalIkut' => $totals[self::BILLABLE_STATUS->value],
+            'totalIkut' => $totals[CateringAttendanceStatus::Ikut->value],
+            'totalBillableDays' => $totalBillableDays,
             'totalSakit' => $totals[CateringAttendanceStatus::Sakit->value],
             'totalIzin' => $totals[CateringAttendanceStatus::Izin->value],
             'totalAlfa' => $totals[CateringAttendanceStatus::Alfa->value],
@@ -423,19 +435,19 @@ class CateringInvoiceService
      * Load saved attendance rows for many members in one bounded query.
      *
      * @param  array<int, int>  $memberIds
-     * @return array<int, array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>>
+     * @return array<int, array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>>
      */
     private function attendanceRowsForMembers(
         array $memberIds,
         CarbonImmutable $start,
         CarbonImmutable $end,
     ): array {
-        /** @var array<int, array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>> $grouped */
+        /** @var array<int, array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>> $grouped */
         $grouped = [];
 
         CateringAttendance::query()
             ->coveredByMembership()
-            ->select(['catering_member_id', 'attendance_date', 'status'])
+            ->select(['catering_member_id', 'attendance_date', 'status', 'is_culture_meal_billable'])
             ->whereIn('catering_member_id', $memberIds)
             ->where('attendance_date', '>=', $start->toDateString())
             ->where('attendance_date', '<', $end->addDay()->toDateString())
@@ -449,6 +461,7 @@ class CateringInvoiceService
                     'date' => $date->format('d/m/Y'),
                     'dateIso' => $date->toDateString(),
                     'status' => $attendance->status,
+                    'isBillable' => $attendance->isBillable(),
                 ];
             });
 
@@ -458,7 +471,7 @@ class CateringInvoiceService
     /**
      * Count saved attendance rows per status for a single member.
      *
-     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
+     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>  $rows
      * @return array<string, int>
      */
     private function statusCounts(array $rows): array
@@ -482,7 +495,7 @@ class CateringInvoiceService
      * printed detail and the status recap only cover the days the invoice
      * actually reports.
      *
-     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
+     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>  $rows
      * @return array<string, mixed>
      */
     private function composeInvoice(
@@ -502,12 +515,19 @@ class CateringInvoiceService
         $counts = $bill === null
             ? $this->statusCounts($visibleRows)
             : $this->billStatusCounts($bill);
-        $quantity = $counts[self::BILLABLE_STATUS->value];
+        $activeDays = $bill?->active_days ?? $counts[CateringAttendanceStatus::Ikut->value];
+        $billableCultureMealDays = $bill?->billable_culture_meal_days ?? $this->billableCultureMealRowCount($visibleRows);
+        $cultureMealBillablePrice = $bill?->culture_meal_billable_price
+            ?? ($billableCultureMealDays > 0 ? $this->cultureMealBillablePrice() : 0);
+        $quantity = $bill?->billable_days ?? ($activeDays + $billableCultureMealDays);
+        $activeAmount = $activeDays * $pricePerDay;
+        $cultureMealBillableAmount = $bill?->culture_meal_billable_amount
+            ?? ($billableCultureMealDays * $cultureMealBillablePrice);
         $group = $category?->participant_group ?? CateringParticipantGroup::Student;
         $usesClass = $group->requiresClassSelection();
         $className = $usesClass ? ($member->schoolClass?->name ?? '-') : $group->label();
         $isEmployee = $group === CateringParticipantGroup::Employee;
-        $total = $bill?->gross_amount ?? ($quantity * $pricePerDay);
+        $total = $bill?->gross_amount ?? ($activeAmount + $cultureMealBillableAmount);
         $totalOutstanding = $outstandingBreakdown['total'];
         $totalDue = $total + $totalOutstanding;
         $invoiceNumber = sprintf('INV/CAF/%02d/%d/%d', $start->month, $start->year, $member->id);
@@ -541,6 +561,14 @@ class CateringInvoiceService
             'savedDays' => $bill?->saved_days ?? count($rows),
             'pricePerDay' => $pricePerDay,
             'pricePerDayFormatted' => $this->formatRupiah($pricePerDay),
+            'activeDays' => $activeDays,
+            'activeAmount' => $activeAmount,
+            'activeAmountFormatted' => $this->formatRupiah($activeAmount),
+            'billableCultureMealDays' => $billableCultureMealDays,
+            'cultureMealBillablePrice' => $cultureMealBillablePrice,
+            'cultureMealBillablePriceFormatted' => $this->formatRupiah($cultureMealBillablePrice),
+            'cultureMealBillableAmount' => $cultureMealBillableAmount,
+            'cultureMealBillableAmountFormatted' => $this->formatRupiah($cultureMealBillableAmount),
             'total' => $total,
             'totalFormatted' => $this->formatRupiah($total),
             'totalOutstanding' => $totalOutstanding,
@@ -553,8 +581,8 @@ class CateringInvoiceService
             'paidAmountFormatted' => $this->formatRupiah($bill?->paidAmount() ?? 0),
             'remainingAmount' => $bill?->remainingAmount() ?? $total,
             'remainingAmountFormatted' => $this->formatRupiah($bill?->remainingAmount() ?? $total),
-            'attendanceRows' => $this->detailRows($visibleRows, $pricePerDay),
-            'countIkut' => $counts[self::BILLABLE_STATUS->value],
+            'attendanceRows' => $this->detailRows($visibleRows, $pricePerDay, $cultureMealBillablePrice),
+            'countIkut' => $counts[CateringAttendanceStatus::Ikut->value],
             'countSakit' => $counts[CateringAttendanceStatus::Sakit->value],
             'countIzin' => $counts[CateringAttendanceStatus::Izin->value],
             'countAlfa' => $counts[CateringAttendanceStatus::Alfa->value],
@@ -701,8 +729,8 @@ class CateringInvoiceService
      * Libur remains stored as attendance history but is not relevant to invoice
      * presentation. Every other status remains visible regardless of weekday.
      *
-     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
-     * @return array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>
+     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>  $rows
+     * @return array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>
      */
     private function invoiceVisibleRows(array $rows): array
     {
@@ -713,19 +741,24 @@ class CateringInvoiceService
     }
 
     /**
-     * Turn saved attendance rows into printable detail rows where only "ikut" is billed.
+     * Turn saved attendance rows into printable detail rows using the attendance billing rule.
      *
-     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus}>  $rows
+     * @param  array<int, array{date: string, dateIso: string, status: CateringAttendanceStatus, isBillable: bool}>  $rows
      * @return array<int, array<string, string|int|bool>>
      */
-    private function detailRows(array $rows, int $pricePerDay): array
+    private function detailRows(array $rows, int $pricePerDay, int $cultureMealBillablePrice): array
     {
         $detail = [];
         $number = 0;
 
         foreach ($rows as $row) {
-            $isBillable = $row['status'] === self::BILLABLE_STATUS;
-            $subtotal = $isBillable ? $pricePerDay : 0;
+            $isBillable = $row['isBillable'];
+            $rate = match (true) {
+                $row['status'] === CateringAttendanceStatus::Ikut => $pricePerDay,
+                $row['status'] === CateringAttendanceStatus::Alfa && $isBillable => $cultureMealBillablePrice,
+                default => 0,
+            };
+            $subtotal = $rate;
             $number++;
 
             $detail[] = [
@@ -733,13 +766,29 @@ class CateringInvoiceService
                 'date' => $row['date'],
                 'status' => $row['status']->label(),
                 'isBillable' => $isBillable,
-                'pricePerDayFormatted' => $isBillable ? $this->formatRupiah($pricePerDay) : '-',
+                'pricePerDayFormatted' => $isBillable ? $this->formatRupiah($rate) : '-',
                 'subtotal' => $subtotal,
                 'subtotalFormatted' => $this->formatRupiah($subtotal),
             ];
         }
 
         return $detail;
+    }
+
+    /**
+     * @param  array<int, array{status: CateringAttendanceStatus, isBillable: bool}>  $rows
+     */
+    private function billableCultureMealRowCount(array $rows): int
+    {
+        return count(array_filter(
+            $rows,
+            fn (array $row): bool => $row['status'] === CateringAttendanceStatus::Alfa && $row['isBillable'],
+        ));
+    }
+
+    private function cultureMealBillablePrice(): int
+    {
+        return $this->cachedCultureMealBillablePrice ??= $this->cultureMealSetting->getCultureMealBillablePrice();
     }
 
     /**

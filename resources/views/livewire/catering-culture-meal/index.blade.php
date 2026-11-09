@@ -40,14 +40,27 @@
         </div>
     </section>
 
-    <section class="card">
-        <div class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Harga Budaya Makan</p>
-                <p class="mt-1 text-2xl font-bold text-slate-900">{{ $cultureMealPriceLabel }}</p>
-                <p class="mt-1 text-xs text-slate-500">Harga referensi Budaya Makan. Pemasukan tetap dicatat manual.</p>
+    <section class="grid gap-3 lg:grid-cols-2">
+        <div class="card">
+            <div class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Harga Budaya Makan</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900">{{ $cultureMealPriceLabel }}</p>
+                    <p class="mt-1 text-xs text-slate-500">Harga referensi Budaya Makan. Pemasukan tetap dicatat manual.</p>
+                </div>
+                <button type="button" wire:click="editCultureMealPrice" class="btn-secondary shrink-0">Edit Harga</button>
             </div>
-            <button type="button" wire:click="editCultureMealPrice" class="btn-secondary shrink-0">Edit Harga</button>
+        </div>
+
+        <div class="card border-blue-200">
+            <div class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Harga Budaya Makan Tagihan</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900">{{ $cultureMealBillablePriceLabel }}</p>
+                    <p class="mt-1 text-xs text-slate-500">Digunakan untuk Budaya Makan Tagihan (B+) pada tagihan siswa. Tidak memengaruhi pemasukan manual Budaya Makan.</p>
+                </div>
+                <button type="button" wire:click="editCultureMealBillablePrice" class="btn-secondary shrink-0">Edit Harga</button>
+            </div>
         </div>
     </section>
 
@@ -63,11 +76,11 @@
 
         <div class="card card-body border-blue-200 bg-blue-50/60">
             <div class="flex items-start justify-between gap-3">
-                <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Total Tagihan Tercatat</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Nilai Referensi Tercatat</p>
                 <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">{{ $periodLabel }}</span>
             </div>
             <p class="mt-3 text-3xl font-bold text-blue-700">{{ $totalRecordedBillLabel }}</p>
-            <p class="mt-1 text-xs text-slate-500">Nilai tercatat berdasarkan jumlah Budaya Makan × harga referensi.</p>
+            <p class="mt-1 text-xs text-slate-500">Jumlah Budaya Makan × harga referensi; bukan tagihan siswa atau pemasukan manual.</p>
             <p class="mt-2 text-xs font-medium text-blue-700">{{ number_format($total, 0, ',', '.') }} × {{ $cultureMealPriceLabel }}</p>
         </div>
 
@@ -272,6 +285,49 @@
                         <button type="submit" wire:loading.attr="disabled" class="btn-primary">
                             <span wire:loading.remove wire:target="saveCultureMealPrice">Simpan Perubahan</span>
                             <span wire:loading wire:target="saveCultureMealPrice">Menyimpan...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    {{-- BILLABLE CULTURE MEAL PRICE MODAL --}}
+    @if ($showBillablePriceModal)
+        <div x-scroll-lock x-on:keydown.escape.window="$wire.closeBillablePriceModal()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="billable-price-modal-title">
+            <div wire:click="closeBillablePriceModal" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[1px]" aria-hidden="true"></div>
+
+            <div class="relative z-10 flex max-h-[90vh] max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+                    <div>
+                        <h3 id="billable-price-modal-title" class="text-base font-semibold text-slate-900">Harga Budaya Makan Tagihan</h3>
+                        <p class="mt-1 text-sm text-slate-500">Berlaku untuk B+ pada tagihan siswa dan tidak memengaruhi pemasukan manual.</p>
+                    </div>
+                    <button type="button" wire:click="closeBillablePriceModal" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup formulir">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+
+                <form wire:submit="saveCultureMealBillablePrice" class="flex min-h-0 flex-1 flex-col">
+                    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
+                        <div>
+                            <label for="billable-price-amount" class="label">Harga (Rp)</label>
+                            <div class="relative">
+                                <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">Rp</span>
+                                <input id="billable-price-amount" type="number" inputmode="numeric" min="1" step="1" wire:model="culture_meal_billable_price" class="input pl-10" placeholder="16000" />
+                            </div>
+                            <p class="mt-1.5 text-xs text-slate-500">Masukkan angka penuh tanpa titik atau koma.</p>
+                            @error('culture_meal_billable_price')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    </div>
+
+                    <div class="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                        <button type="button" wire:click="closeBillablePriceModal" class="btn-secondary">Batal</button>
+                        <button type="submit" wire:loading.attr="disabled" class="btn-primary">
+                            <span wire:loading.remove wire:target="saveCultureMealBillablePrice">Simpan Perubahan</span>
+                            <span wire:loading wire:target="saveCultureMealBillablePrice">Menyimpan...</span>
                         </button>
                     </div>
                 </form>

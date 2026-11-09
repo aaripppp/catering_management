@@ -4,6 +4,7 @@ use App\Enums\CateringAttendanceStatus;
 use App\Models\CateringAttendance;
 use App\Models\CateringMember;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Schema;
 
 it('uses active and off display labels without changing stored status values', function () {
     expect(CateringAttendanceStatus::Ikut->value)->toBe('ikut')
@@ -33,6 +34,25 @@ it('loads an existing alfa database row through the unchanged enum value', funct
         'id' => $attendance->id,
         'status' => 'alfa',
     ]);
+});
+
+it('stores the culture meal billing flag as a backward compatible boolean', function () {
+    $attendance = CateringAttendance::factory()->create([
+        'status' => CateringAttendanceStatus::Alfa,
+    ]);
+
+    expect(Schema::hasColumn('catering_attendances', 'is_culture_meal_billable'))->toBeTrue()
+        ->and($attendance->is_culture_meal_billable)->toBeFalse();
+});
+
+it('normalizes the culture meal billing flag off for non culture meal statuses', function () {
+    $attendance = CateringAttendance::factory()->create([
+        'status' => CateringAttendanceStatus::Ikut,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    expect($attendance->is_culture_meal_billable)->toBeFalse()
+        ->and($attendance->isBillable())->toBeTrue();
 });
 
 it('defines the manual non-billable attendance statuses', function (CateringAttendanceStatus $status, string $value, string $label, string $shorthand) {

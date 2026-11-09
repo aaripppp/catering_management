@@ -332,8 +332,9 @@
             <th class="num" style="width: 4%;">Event</th>
             <th class="num" style="width: 4%;">Puasa</th>
             <th class="num" style="width: 4%;">Libur</th>
-            <th class="right nowrap" style="width: 9%;">Harga / {{ CateringAttendanceStatus::Ikut->label() }}</th>
-            <th class="right nowrap" style="width: 20%;">Tagihan Bulan Ini</th>
+            <th class="num" style="width: 6%;">Hari Ditagihkan</th>
+            <th class="right nowrap" style="width: 9%;">Harga / Hari</th>
+            <th class="right nowrap" style="width: 14%;">Tagihan Bulan Ini</th>
         </tr>
     </thead>
     <tbody>
@@ -350,12 +351,23 @@
                 <td class="num">{{ $row['eventUnit'] }}</td>
                 <td class="num">{{ $row['puasa'] }}</td>
                 <td class="num">{{ $row['libur'] }}</td>
-                <td class="right nowrap">{{ $row['pricePerDayFormatted'] }}</td>
+                <td class="num">
+                    {{ $row['ikut'] }}
+                    @if ($row['billableCultureMealDays'] > 0)
+                        + {{ $row['billableCultureMealDays'] }} BM
+                    @endif
+                </td>
+                <td class="right nowrap">
+                    {{ $row['pricePerDayFormatted'] }}
+                    @if ($row['billableCultureMealDays'] > 0)
+                        <br>BM {{ $row['cultureMealBillablePriceFormatted'] }}
+                    @endif
+                </td>
                 <td class="right nowrap">{{ $row['totalFormatted'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="13" class="num">Belum ada peserta aktif kategori Siswa Umum pada kelas ini.</td>
+                <td colspan="14" class="num">Belum ada peserta aktif kategori Siswa Umum pada kelas ini.</td>
             </tr>
         @endforelse
     </tbody>
@@ -372,6 +384,7 @@
                 <td class="num">{{ $totalEventUnit }}</td>
                 <td class="num">{{ $totalPuasa }}</td>
                 <td class="num">{{ $totalLibur }}</td>
+                <td class="num">{{ $totalBillableDays }}</td>
                 <td class="right nowrap">-</td>
                 <td class="right nowrap">{{ $grandTotalFormatted }}</td>
             </tr>
@@ -407,17 +420,10 @@
 
 <div class="notes">
     <strong>Catatan:</strong> Rekap ini disusun dari data absensi catering kelas {{ $className }} yang telah disimpan
-    untuk periode {{ $periodLabel }}. Hanya status <strong>{{ CateringAttendanceStatus::Ikut->label() }}</strong> yang
-    ditagihkan; status {{ CateringAttendanceStatus::Sakit->label() }},
-    {{ CateringAttendanceStatus::Izin->label() }},
-    {{ CateringAttendanceStatus::Alfa->label() }},
-    {{ CateringAttendanceStatus::TidakIkut->label() }},
-    {{ CateringAttendanceStatus::Ujian->label() }},
-    {{ CateringAttendanceStatus::EventUnit->label() }},
-    {{ CateringAttendanceStatus::Puasa->label() }}, dan
-    {{ CateringAttendanceStatus::Libur->label() }} tidak menambah tagihan.
-    Harga per porsi mengikuti harga kategori masing-masing peserta, sehingga total bersifat jumlah per peserta
-    dan bukan hasil rata-rata harga.
+    untuk periode {{ $periodLabel }}. Tagihan dihitung berdasarkan aturan perhitungan catering yang berlaku.
+    Status yang tidak termasuk perhitungan tidak menambah tagihan.
+    Harga Aktif mengikuti kategori masing-masing peserta, sedangkan Budaya Makan yang ditagihkan mengikuti harga
+    global yang tersimpan pada tagihan. Total merupakan jumlah per peserta dan bukan hasil rata-rata harga.
 </div>
 
 <div class="footer">

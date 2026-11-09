@@ -50,12 +50,49 @@ function settingCultureAttendance(): void
 }
 
 it('defaults the culture meal price to 16000', function () {
-    expect(settingService()->getCultureMealPrice())->toBe(16000);
+    expect(settingService()->getCultureMealPrice())->toBe(16000)
+        ->and(settingService()->getCultureMealBillablePrice())->toBe(16000);
 
     $this->seed(CateringSettingSeeder::class);
 
     expect(CateringSetting::query()->where('key', 'culture_meal_price')->value('value'))->toBe('16000')
-        ->and(settingService()->getCultureMealPrice())->toBe(16000);
+        ->and(CateringSetting::query()->where('key', 'culture_meal_billable_price')->value('value'))->toBe('16000')
+        ->and(settingService()->getCultureMealPrice())->toBe(16000)
+        ->and(settingService()->getCultureMealBillablePrice())->toBe(16000);
+});
+
+it('updates the billable culture meal price independently from the reference price', function () {
+    $admin = User::factory()->admin()->create();
+
+    settingCulturePage($admin)
+        ->assertSee('Harga Budaya Makan Tagihan')
+        ->assertSee('Digunakan untuk Budaya Makan Tagihan (B+) pada tagihan siswa.')
+        ->call('editCultureMealBillablePrice')
+        ->assertSet('culture_meal_billable_price', '16000')
+        ->set('culture_meal_billable_price', '17500')
+        ->call('saveCultureMealBillablePrice')
+        ->assertHasNoErrors()
+        ->assertSet('showBillablePriceModal', false)
+        ->assertSee('Rp 17.500');
+
+    expect(settingService()->getCultureMealBillablePrice())->toBe(17500)
+        ->and(settingService()->getCultureMealPrice())->toBe(16000)
+        ->and(CateringSetting::query()->where('key', 'culture_meal_billable_price')->value('value'))->toBe('17500');
+});
+
+it('rejects zero billable culture meal price and safely defaults an invalid stored value', function () {
+    settingCulturePage(User::factory()->admin()->create())
+        ->call('editCultureMealBillablePrice')
+        ->set('culture_meal_billable_price', '0')
+        ->call('saveCultureMealBillablePrice')
+        ->assertHasErrors(['culture_meal_billable_price']);
+
+    CateringSetting::query()->updateOrCreate(
+        ['key' => 'culture_meal_billable_price'],
+        ['value' => '0'],
+    );
+
+    expect(settingService()->getCultureMealBillablePrice())->toBe(16000);
 });
 
 it('displays the reference price on the Budaya Makan page as Rp 16.000', function () {
@@ -174,6 +211,26 @@ it('does not change existing manual income when the price changes', function () 
     $income->refresh();
 
     expect($income->amount)->toBe(100000)
+        ->and(app(CateringCultureMealIncomeService::class)->monthlyTotal(10, 2026))->toBe(100000);
+});
+
+it('does not change existing manual income when the billable price changes', function () {
+    $admin = User::factory()->admin()->create();
+    $class = SchoolClass::factory()->create();
+    $income = app(CateringCultureMealIncomeService::class)->create([
+        'income_date' => '2026-10-10',
+        'school_class_id' => $class->id,
+        'amount' => 100000,
+        'note' => 'Pemasukan manual',
+    ], $admin);
+
+    settingCulturePage($admin)
+        ->call('editCultureMealBillablePrice')
+        ->set('culture_meal_billable_price', '18000')
+        ->call('saveCultureMealBillablePrice')
+        ->assertHasNoErrors();
+
+    expect($income->fresh()->amount)->toBe(100000)
         ->and(app(CateringCultureMealIncomeService::class)->monthlyTotal(10, 2026))->toBe(100000);
 });
 

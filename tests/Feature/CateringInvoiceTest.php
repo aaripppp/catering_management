@@ -13,6 +13,7 @@ use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringAttendanceInitializerService;
 use App\Services\CateringBillingService;
+use App\Services\CateringCultureMealSettingService;
 use App\Services\CateringInvoiceService;
 use App\Services\CateringPaymentService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -1280,6 +1281,57 @@ it('bills only the ikut row in the individual invoice detail table', function ()
         ->and($invoice['total'])->toBe(17000);
 });
 
+it('bills only flagged budaya makan in live and synchronized invoice quantities', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 12000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    saveSeptemberAttendance($member, ikut: 1, alfa: 2);
+    coverInvoiceMember($member);
+    CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-03')
+        ->update(['is_culture_meal_billable' => true]);
+    app(CateringCultureMealSettingService::class)->updateCultureMealBillablePrice(16000);
+
+    [$start, $end] = invoicePeriod();
+    $service = invoiceService();
+    $liveInvoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
+    $liveRows = collect($liveInvoice['attendanceRows'])->keyBy('date');
+
+    expect($liveInvoice['quantity'])->toBe(2)
+        ->and($liveInvoice['activeDays'])->toBe(1)
+        ->and($liveInvoice['billableCultureMealDays'])->toBe(1)
+        ->and($liveInvoice['cultureMealBillablePrice'])->toBe(16000)
+        ->and($liveInvoice['total'])->toBe(28000)
+        ->and($liveRows['02/09/2026']['status'])->toBe('Budaya Makan')
+        ->and($liveRows['02/09/2026']['subtotal'])->toBe(0)
+        ->and($liveRows['03/09/2026']['status'])->toBe('Budaya Makan')
+        ->and($liveRows['03/09/2026'])->not->toHaveKey('billingLabel')
+        ->and($liveRows['03/09/2026']['subtotal'])->toBe(16000)
+        ->and(invoicePdfText($service->renderPdf($liveInvoice)))->not->toContain('Terhitung tagihan');
+
+    app(CateringBillingService::class)->generate(2026, 9, CateringParticipantGroup::Student, $schoolClass);
+    app(CateringCultureMealSettingService::class)->updateCultureMealBillablePrice(17000);
+
+    $snapshotInvoice = $service->buildMemberInvoice($member->fresh(['cateringCategory', 'schoolClass']), $start, $end);
+    $bulkInvoice = $service->buildBulkInvoices(CateringParticipantGroup::Student, $schoolClass, $start, $end)[0];
+
+    expect(CateringBill::query()->sole()->billable_days)->toBe(2)
+        ->and(CateringBill::query()->sole()->culture_meal_billable_price)->toBe(16000)
+        ->and($snapshotInvoice['quantity'])->toBe(2)
+        ->and($snapshotInvoice['cultureMealBillablePrice'])->toBe(16000)
+        ->and($snapshotInvoice['total'])->toBe(28000)
+        ->and(collect($snapshotInvoice['attendanceRows'])->keyBy('date')['03/09/2026']['subtotal'])->toBe(16000)
+        ->and($bulkInvoice['quantity'])->toBe($snapshotInvoice['quantity'])
+        ->and($bulkInvoice['cultureMealBillablePrice'])->toBe($snapshotInvoice['cultureMealBillablePrice'])
+        ->and($bulkInvoice['attendanceRows'])->toBe($snapshotInvoice['attendanceRows'])
+        ->and($bulkInvoice['total'])->toBe($snapshotInvoice['total']);
+});
+
 it('summarises every status count in the individual invoice', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $category = CateringCategory::factory()->create(['price_per_day' => 17000]);
@@ -1588,7 +1640,8 @@ it('reports per status counts and the participant total in the class summary', f
     $text = invoicePdfText(invoiceService()->renderClassPdf($invoice));
 
     expect($text)->toContain('NAMA SISWA')
-        ->and($text)->toContain('HARGA / AKTIF')
+        ->and($text)->toContain('HARI DITAGIHKAN')
+        ->and($text)->toContain('HARGA / HARI')
         ->and($text)->toContain('TOTAL')
         ->and($text)->toContain('BUDAYA MAKAN')
         ->and($text)->not->toContain('ALFA')
@@ -1624,8 +1677,13 @@ it('uses each participant generated bill snapshot in the class summary total', f
         'period_year' => 2026,
         'price_per_day' => 20000,
         'saved_days' => 3,
-        'active_days' => 3,
-        'gross_amount' => 60000,
+        'active_days' => 2,
+        'billable_days' => 3,
+        'billable_culture_meal_days' => 1,
+        'culture_meal_billable_price' => 16000,
+        'culture_meal_billable_amount' => 16000,
+        'alfa_days' => 1,
+        'gross_amount' => 56000,
     ]);
     CateringBill::factory()->create([
         'catering_member_id' => $second->id,
@@ -1644,11 +1702,13 @@ it('uses each participant generated bill snapshot in the class summary total', f
     $rows = collect($invoice['rows'])->keyBy('memberName');
 
     expect($rows['Ahmad Zaki']['pricePerDay'])->toBe(20000)
-        ->and($rows['Ahmad Zaki']['total'])->toBe(60000)
+        ->and($rows['Ahmad Zaki']['billableCultureMealDays'])->toBe(1)
+        ->and($rows['Ahmad Zaki']['cultureMealBillablePrice'])->toBe(16000)
+        ->and($rows['Ahmad Zaki']['total'])->toBe(56000)
         ->and($rows['Aisyah Putri']['pricePerDay'])->toBe(10000)
         ->and($rows['Aisyah Putri']['total'])->toBe(40000)
-        ->and($invoice['grandTotal'])->toBe(100000)
-        ->and($invoice['grandTotalFormatted'])->toBe('Rp 100.000');
+        ->and($invoice['grandTotal'])->toBe(96000)
+        ->and($invoice['grandTotalFormatted'])->toBe('Rp 96.000');
 });
 
 it('does not average participant prices in the class summary grand total', function () {
@@ -2010,7 +2070,7 @@ it('fits a 22 row invoice with prior outstanding and footer on one a4 page', fun
         ->and($text)->toContain('KONFIRMASI PEMBAYARAN')
         ->and($text)->toContain('5222129702')
         ->and($text)->toContain('0813-9994-7699')
-        ->and($text)->toContain('Hanya status Aktif yang dihitung.')
+        ->and($text)->toContain('Tagihan dihitung berdasarkan aturan perhitungan catering yang berlaku.')
         ->and($text)->toContain('Baris berstatus Libur tidak ditampilkan')
         ->and($text)->toContain('Invoice ini dihasilkan otomatis dari data absensi yang telah disimpan.')
         ->and($html)->not->toContain('page-break-before');

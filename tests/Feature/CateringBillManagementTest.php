@@ -15,6 +15,7 @@ use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringBillingService;
+use App\Services\CateringCultureMealSettingService;
 use App\Services\CateringPaymentService;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
@@ -71,6 +72,88 @@ it('does not flag a synchronized bill for stored attendance outside membership',
 
     expect(CateringAttendance::query()->where('catering_member_id', $member->id)->count())->toBe(2)
         ->and(CateringBill::query()->sole()->active_days)->toBe(1);
+});
+
+it('flags a synchronized bill when only the budaya makan billing flag changes', function () {
+    $admin = User::factory()->admin()->create();
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 16000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Ahmad Zaki',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
+    $cultureMeal = CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-01',
+        'status' => CateringAttendanceStatus::Alfa,
+    ]);
+    app(CateringBillingService::class)->generate(2026, 10, CateringParticipantGroup::Student, $schoolClass, actor: $admin);
+
+    Livewire::actingAs($admin)
+        ->test(CateringBillIndex::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertDontSee('Perlu sinkronisasi');
+
+    $cultureMeal->update(['is_culture_meal_billable' => true]);
+
+    Livewire::actingAs($admin)
+        ->test(CateringBillIndex::class)
+        ->set('month', 10)
+        ->set('year', 2026)
+        ->assertSee('Perlu sinkronisasi')
+        ->call('generate')
+        ->assertDontSee('Perlu sinkronisasi');
+
+    expect(CateringBill::query()->sole()->billable_days)->toBe(1)
+        ->and(CateringBill::query()->sole()->gross_amount)->toBe(16000);
+});
+
+it('flags only bills with billable budaya makan when the global price changes', function () {
+    $admin = User::factory()->admin()->create();
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 12000]);
+    $withCultureMeal = CateringMember::factory()->create([
+        'name' => 'Dengan B Plus',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    $withoutCultureMeal = CateringMember::factory()->create([
+        'name' => 'Tanpa B Plus',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+
+    foreach ([$withCultureMeal, $withoutCultureMeal] as $member) {
+        CateringMemberPeriod::create(['catering_member_id' => $member->id, 'start_date' => '2026-10-01', 'end_date' => null]);
+        CateringAttendance::factory()->for($member)->create([
+            'attendance_date' => '2026-10-01',
+            'status' => CateringAttendanceStatus::Ikut,
+        ]);
+    }
+    CateringAttendance::factory()->for($withCultureMeal)->create([
+        'attendance_date' => '2026-10-02',
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    app(CateringBillingService::class)->generate(2026, 10, CateringParticipantGroup::Student, $schoolClass, actor: $admin);
+    app(CateringCultureMealSettingService::class)->updateCultureMealBillablePrice(17000);
+
+    $component = Livewire::actingAs($admin)
+        ->test(CateringBillIndex::class)
+        ->set('month', 10)
+        ->set('year', 2026);
+
+    $html = $component->html();
+    $withRowStart = strpos($html, 'Dengan B Plus');
+    $withoutRowStart = strpos($html, 'Tanpa B Plus');
+
+    expect($withRowStart)->not->toBeFalse()
+        ->and($withoutRowStart)->not->toBeFalse()
+        ->and(substr($html, $withRowStart, $withoutRowStart - $withRowStart))->toContain('Perlu sinkronisasi')
+        ->and(substr($html, $withoutRowStart))->not->toContain('Perlu sinkronisasi');
 });
 
 it('generates bills for the selected period and class', function () {
@@ -178,7 +261,7 @@ it('shows each category in its own column before the daily price without changin
 
     Livewire::actingAs($admin)
         ->test(CateringBillIndex::class)
-        ->assertSeeInOrder(['Hari Aktif', 'Kategori', 'Harga/Hari'])
+        ->assertSeeInOrder(['Hari Ditagihkan', 'Kategori', 'Harga/Hari'])
         ->assertSee('Siswa Umum')
         ->assertSee('Anak Guru')
         ->assertSee('Rp 15.000')

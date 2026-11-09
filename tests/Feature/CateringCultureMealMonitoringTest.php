@@ -28,11 +28,16 @@ function cultureMealPeriod(CateringMember $member, string $start, ?string $end =
     ]);
 }
 
-function cultureMealAttendance(CateringMember $member, string $date, CateringAttendanceStatus $status = CateringAttendanceStatus::Alfa): CateringAttendance
-{
+function cultureMealAttendance(
+    CateringMember $member,
+    string $date,
+    CateringAttendanceStatus $status = CateringAttendanceStatus::Alfa,
+    bool $isCultureMealBillable = false,
+): CateringAttendance {
     return CateringAttendance::factory()->for($member)->create([
         'attendance_date' => $date,
         'status' => $status,
+        'is_culture_meal_billable' => $isCultureMealBillable,
     ]);
 }
 
@@ -88,6 +93,19 @@ it('counts Budaya Makan for an open membership period', function () {
     cultureMealAttendance($member, '2026-10-18');
 
     expect(cultureMealMonitor(10, 2026)['total'])->toBe(1);
+});
+
+it('counts both billable and non billable Budaya Makan rows', function () {
+    $member = cultureMealStudent();
+    cultureMealPeriod($member, '2026-10-01');
+    cultureMealAttendance($member, '2026-10-10');
+    cultureMealAttendance($member, '2026-10-11', isCultureMealBillable: true);
+
+    $monitoring = cultureMealMonitor();
+
+    expect($monitoring['total'])->toBe(2)
+        ->and(cultureMealDailyCount($monitoring, '2026-10-10'))->toBe(1)
+        ->and(cultureMealDailyCount($monitoring, '2026-10-11'))->toBe(1);
 });
 
 it('counts only the internal alfa status as Budaya Makan', function () {

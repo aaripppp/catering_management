@@ -143,7 +143,7 @@
                         <th class="w-10 text-center">No</th>
                         <th>Peserta</th>
                         <th>Kelas / Kelompok</th>
-                        <th class="text-center">Hari Aktif</th>
+                        <th class="text-center">Hari Ditagihkan</th>
                         <th>Kategori</th>
                         <th class="text-right">Harga/Hari</th>
                         <th class="text-right">Tagihan</th>
@@ -165,14 +165,34 @@
                             <td class="text-center text-sm text-slate-500">{{ $bills->firstItem() + $loop->index }}</td>
                             <td>
                                 <p class="whitespace-nowrap font-semibold text-slate-900">{{ $bill->member_name }}</p>
-                                @if ((int) $bill->current_active_days !== $bill->active_days)
+                                @if (
+                                    (int) $bill->current_active_days !== $bill->active_days
+                                    || (int) $bill->current_alfa_days !== $bill->alfa_days
+                                    || (int) $bill->current_billable_days !== $bill->billable_days
+                                    || (int) $bill->current_billable_culture_meal_days !== $bill->billable_culture_meal_days
+                                    || (int) $bill->current_price_per_day !== $bill->price_per_day
+                                    || (
+                                        ((int) $bill->current_billable_culture_meal_days > 0 || $bill->billable_culture_meal_days > 0)
+                                        && $currentCultureMealBillablePrice !== $bill->culture_meal_billable_price
+                                    )
+                                )
                                     <span class="mt-1 inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">Perlu sinkronisasi</span>
                                 @endif
                             </td>
                             <td class="whitespace-nowrap text-slate-600">{{ $bill->school_class_name ?: $bill->participant_group->label() }}</td>
-                            <td class="text-center font-medium text-slate-800">{{ $bill->active_days }}</td>
+                            <td class="text-center font-medium text-slate-800">
+                                {{ $bill->active_days }}
+                                @if ($bill->billable_culture_meal_days > 0)
+                                    <span class="whitespace-nowrap text-blue-700">+ {{ $bill->billable_culture_meal_days }} B+</span>
+                                @endif
+                            </td>
                             <td class="whitespace-nowrap text-slate-600">{{ $bill->category_name }}</td>
-                            <td class="whitespace-nowrap text-right text-slate-600">Rp {{ number_format($bill->price_per_day, 0, ',', '.') }}</td>
+                            <td class="whitespace-nowrap text-right text-slate-600">
+                                Rp {{ number_format($bill->price_per_day, 0, ',', '.') }}
+                                @if ($bill->billable_culture_meal_days > 0)
+                                    <span class="block text-xs text-blue-700">+ Rp {{ number_format($bill->culture_meal_billable_price, 0, ',', '.') }}</span>
+                                @endif
+                            </td>
                             <td class="whitespace-nowrap text-right font-semibold text-slate-900">Rp {{ number_format($bill->gross_amount, 0, ',', '.') }}</td>
                             <td class="whitespace-nowrap text-right text-emerald-700">Rp {{ number_format($paid, 0, ',', '.') }}</td>
                             <td class="whitespace-nowrap text-right font-semibold {{ $overpayment > 0 ? 'text-violet-700' : 'text-slate-500' }}">Rp {{ number_format($overpayment, 0, ',', '.') }}</td>
@@ -251,6 +271,20 @@
                         <div class="rounded-lg bg-emerald-50 p-3"><p class="text-xs text-emerald-700">Total Dibayar</p><p class="mt-1 whitespace-nowrap font-semibold text-emerald-900">Rp {{ number_format($selectedBill->paidAmount(), 0, ',', '.') }}</p></div>
                         <div class="rounded-lg bg-amber-50 p-3"><p class="text-xs text-amber-700">Sisa</p><p class="mt-1 whitespace-nowrap font-semibold text-amber-900">Rp {{ number_format($selectedRemaining, 0, ',', '.') }}</p></div>
                         <div class="rounded-lg bg-sky-50 p-3"><p class="text-xs text-sky-700">Kredit</p><p class="mt-1 whitespace-nowrap font-semibold text-sky-900">Rp {{ number_format($selectedBill->generatedCreditAmount(), 0, ',', '.') }}</p></div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <h4 class="text-sm font-semibold text-slate-900">Rincian Tagihan</h4>
+                        <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                            <div class="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2">
+                                <span class="text-slate-600">Aktif</span>
+                                <strong class="whitespace-nowrap text-slate-900">{{ $selectedBill->active_days }} × Rp {{ number_format($selectedBill->price_per_day, 0, ',', '.') }} = Rp {{ number_format($selectedBill->active_days * $selectedBill->price_per_day, 0, ',', '.') }}</strong>
+                            </div>
+                            <div class="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2">
+                                <span class="text-slate-600">Budaya Makan</span>
+                                <strong class="whitespace-nowrap text-slate-900">{{ $selectedBill->billable_culture_meal_days }} × Rp {{ number_format($selectedBill->culture_meal_billable_price, 0, ',', '.') }} = Rp {{ number_format($selectedBill->culture_meal_billable_amount, 0, ',', '.') }}</strong>
+                            </div>
+                        </div>
                     </div>
 
                     @if ($selectedRemaining > 0 || $editingPaymentId !== null)

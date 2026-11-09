@@ -12,8 +12,8 @@ use Illuminate\Support\Collection;
  * Builds the read-only Budaya Makan monitoring for a chosen month.
  *
  * Budaya Makan is the user-facing label for the internal "alfa" attendance
- * status. It is informational only: the count never produces income, a bill,
- * an invoice or a payment, and the stored "alfa" value is never renamed.
+ * status. The count includes both billing modes and never creates income,
+ * bills, invoices or payments by itself. The stored "alfa" value is never renamed.
  *
  * Only student attendance inside a valid membership coverage period is counted.
  * The model's coveredByMembership scope is reused so coverage matches the rest

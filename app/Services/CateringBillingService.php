@@ -17,7 +17,10 @@ use Illuminate\Support\Facades\DB;
 
 class CateringBillingService
 {
-    public function __construct(private CateringFinancialReconciliationService $financialReconciliation) {}
+    public function __construct(
+        private CateringFinancialReconciliationService $financialReconciliation,
+        private CateringCultureMealSettingService $cultureMealSetting,
+    ) {}
 
     /**
      * Create missing monthly snapshots and resync existing snapshots from attendance.
@@ -117,8 +120,9 @@ class CateringBillingService
             $start,
             $endExclusive,
         );
+        $cultureMealBillablePrice = $this->cultureMealSetting->getCultureMealBillablePrice();
 
-        return DB::transaction(function () use ($members, $counts, $year, $month, $group, $actor): array {
+        return DB::transaction(function () use ($members, $counts, $year, $month, $group, $actor, $cultureMealBillablePrice): array {
             $memberIds = $members->pluck('id')->all();
             CateringMember::query()
                 ->whereKey($memberIds)
@@ -142,7 +146,7 @@ class CateringBillingService
             foreach ($members as $member) {
                 $existing = $existingBills->get($member->id);
                 $memberCounts = $counts[$member->id] ?? $this->emptyCounts();
-                $snapshots[] = $this->snapshot($member, $memberCounts, $year, $month, $group, $actor, $existing, $now);
+                $snapshots[] = $this->snapshot($member, $memberCounts, $year, $month, $group, $actor, $existing, $now, $cultureMealBillablePrice);
 
                 $existing === null ? $created++ : $regenerated++;
             }
@@ -176,7 +180,9 @@ class CateringBillingService
         CarbonImmutable $from,
         ?User $actor = null,
     ): int {
-        return DB::transaction(function () use ($memberId, $from, $actor): int {
+        $cultureMealBillablePrice = $this->cultureMealSetting->getCultureMealBillablePrice();
+
+        return DB::transaction(function () use ($memberId, $from, $actor, $cultureMealBillablePrice): int {
             $member = CateringMember::query()
                 ->with([
                     'cateringCategory:id,name,price_per_day,participant_group',
@@ -207,7 +213,7 @@ class CateringBillingService
                     $firstPeriod->toDateString(),
                     $lastPeriod->endOfMonth()->toDateString(),
                 ])
-                ->get(['attendance_date', 'status'])
+                ->get(['attendance_date', 'status', 'is_culture_meal_billable'])
                 ->groupBy(fn (CateringAttendance $attendance): string => $attendance->attendance_date->format('Y-n'))
                 ->map(function ($rows): array {
                     $counts = $this->emptyCounts();
@@ -216,6 +222,14 @@ class CateringBillingService
                     foreach ($rows->groupBy(fn (CateringAttendance $attendance): string => $attendance->status->value) as $status => $statusRows) {
                         $counts[$status] = $statusRows->count();
                     }
+
+                    $counts['billable'] = $rows
+                        ->filter(fn (CateringAttendance $attendance): bool => $attendance->isBillable())
+                        ->count();
+                    $counts['billable_culture_meal'] = $rows
+                        ->filter(fn (CateringAttendance $attendance): bool => $attendance->status === CateringAttendanceStatus::Alfa
+                            && $attendance->is_culture_meal_billable)
+                        ->count();
 
                     return $counts;
                 });
@@ -234,6 +248,7 @@ class CateringBillingService
                     $actor,
                     $bill,
                     $now,
+                    $cultureMealBillablePrice,
                 );
             }
 
@@ -266,7 +281,7 @@ class CateringBillingService
 
         $att = CateringAttendance::query()
             ->coveredByMembership()
-            ->select('catering_member_id', 'status')
+            ->select('catering_member_id', 'status', 'is_culture_meal_billable')
             ->whereIn('catering_member_id', $memberIds)
             ->where('attendance_date', '>=', $start->toDateString())
             ->where('attendance_date', '<', $endExclusive->toDateString())
@@ -286,6 +301,13 @@ class CateringBillingService
             foreach (CateringAttendanceStatus::cases() as $status) {
                 $counts[$memberId][$status->value] = (int) ($byStatus->get($status->value)?->count() ?? 0);
             }
+            $counts[$memberId]['billable'] = $rows
+                ->filter(fn (CateringAttendance $attendance): bool => $attendance->isBillable())
+                ->count();
+            $counts[$memberId]['billable_culture_meal'] = $rows
+                ->filter(fn (CateringAttendance $attendance): bool => $attendance->status === CateringAttendanceStatus::Alfa
+                    && $attendance->is_culture_meal_billable)
+                ->count();
         }
 
         return $counts;
@@ -304,9 +326,13 @@ class CateringBillingService
         ?User $actor,
         ?CateringBill $existing,
         mixed $now,
+        int $cultureMealBillablePrice,
     ): array {
         $category = $member->cateringCategory;
         $pricePerDay = (int) ($category?->price_per_day ?? 0);
+        $activeDays = $counts[CateringAttendanceStatus::Ikut->value];
+        $billableCultureMealDays = $counts['billable_culture_meal'];
+        $cultureMealBillableAmount = $billableCultureMealDays * $cultureMealBillablePrice;
 
         return [
             'catering_member_id' => $member->id,
@@ -324,7 +350,11 @@ class CateringBillingService
             'category_name' => $category?->name ?? '-',
             'price_per_day' => $pricePerDay,
             'saved_days' => $counts['saved'],
-            'active_days' => $counts[CateringAttendanceStatus::Ikut->value],
+            'active_days' => $activeDays,
+            'billable_days' => $activeDays + $billableCultureMealDays,
+            'billable_culture_meal_days' => $billableCultureMealDays,
+            'culture_meal_billable_price' => $cultureMealBillablePrice,
+            'culture_meal_billable_amount' => $cultureMealBillableAmount,
             'sakit_days' => $counts[CateringAttendanceStatus::Sakit->value],
             'izin_days' => $counts[CateringAttendanceStatus::Izin->value],
             'alfa_days' => $counts[CateringAttendanceStatus::Alfa->value],
@@ -333,7 +363,7 @@ class CateringBillingService
             'event_unit_days' => $counts[CateringAttendanceStatus::EventUnit->value],
             'puasa_days' => $counts[CateringAttendanceStatus::Puasa->value],
             'libur_days' => $counts[CateringAttendanceStatus::Libur->value],
-            'gross_amount' => $counts[CateringAttendanceStatus::Ikut->value] * $pricePerDay,
+            'gross_amount' => ($activeDays * $pricePerDay) + $cultureMealBillableAmount,
             'payment_status' => $existing?->payment_status->value ?? CateringBillStatus::Unpaid->value,
             'generated_at' => $now,
             'created_at' => $existing?->created_at ?? $now,
@@ -346,7 +376,7 @@ class CateringBillingService
      */
     private function emptyCounts(): array
     {
-        $counts = ['saved' => 0];
+        $counts = ['saved' => 0, 'billable' => 0, 'billable_culture_meal' => 0];
         foreach (CateringAttendanceStatus::cases() as $status) {
             $counts[$status->value] = 0;
         }

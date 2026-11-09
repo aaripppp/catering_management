@@ -14,6 +14,7 @@ use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
 use App\Services\CateringBillingService;
+use App\Services\CateringCultureMealSettingService;
 use App\Services\CateringPaymentService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
@@ -78,6 +79,11 @@ function generateBillingPeriod(
         $schoolClass,
         actor: $actor,
     );
+}
+
+function setBillableCultureMealPrice(int $amount): void
+{
+    app(CateringCultureMealSettingService::class)->updateCultureMealBillablePrice($amount);
 }
 
 it('stores a monthly snapshot until the next manual sync', function () {
@@ -728,4 +734,245 @@ it('resumes billing from the new start date after a membership gap', function ()
         ->and($november->saved_days)->toBe(4)
         ->and($november->active_days)->toBe(4)
         ->and($november->gross_amount)->toBe(80000);
+});
+
+it('bills only flagged budaya makan while preserving active and alfa counts', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-21',
+        'status' => CateringAttendanceStatus::Alfa,
+    ]);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-22',
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->active_days)->toBe(20)
+        ->and($bill->alfa_days)->toBe(2)
+        ->and($bill->billable_days)->toBe(21)
+        ->and($bill->gross_amount)->toBe(336000);
+});
+
+it('never bills a non budaya makan row even when its flag is forced on', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 0, sickDays: 1);
+    DB::table('catering_attendances')
+        ->where('catering_member_id', $member->id)
+        ->update(['is_culture_meal_billable' => true]);
+
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->sakit_days)->toBe(1)
+        ->and($bill->alfa_days)->toBe(0)
+        ->and($bill->billable_days)->toBe(0)
+        ->and($bill->gross_amount)->toBe(0);
+});
+
+it('keeps billable days unchanged when an active day becomes billable budaya makan', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+    $attendance = CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-10-20')
+        ->sole();
+
+    expect($bill->active_days)->toBe(20)
+        ->and($bill->billable_days)->toBe(20);
+
+    $attendance->update([
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+    generateBillingPeriod($schoolClass);
+    $bill->refresh();
+
+    expect($bill->active_days)->toBe(19)
+        ->and($bill->alfa_days)->toBe(1)
+        ->and($bill->billable_days)->toBe(20)
+        ->and($bill->gross_amount)->toBe(320000);
+});
+
+it('preserves payment and makes a paid bill partial when budaya makan becomes billable', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    $cultureMeal = CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-21',
+        'status' => CateringAttendanceStatus::Alfa,
+    ]);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 320000);
+
+    $cultureMeal->update(['is_culture_meal_billable' => true]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+
+    expect($bill->billable_days)->toBe(21)
+        ->and($bill->gross_amount)->toBe(336000)
+        ->and($bill->paidAmount())->toBe(320000)
+        ->and($bill->remainingAmount())->toBe(16000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Partial)
+        ->and($bill->payments()->sole()->is($payment))->toBeTrue();
+});
+
+it('creates student credit when paid billable budaya makan becomes non billable', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    $cultureMeal = CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-21',
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 336000);
+
+    $cultureMeal->update(['is_culture_meal_billable' => false]);
+    generateBillingPeriod($schoolClass);
+
+    $bill->refresh();
+
+    expect($bill->billable_days)->toBe(20)
+        ->and($bill->gross_amount)->toBe(320000)
+        ->and($bill->paidAmount())->toBe(336000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Paid)
+        ->and($bill->payments()->sole()->is($payment))->toBeTrue()
+        ->and(CateringCredit::query()->sole()->original_amount)->toBe(16000);
+});
+
+it('ignores billable budaya makan outside membership coverage', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(16000);
+    $member->periods()->update(['start_date' => '2026-10-10', 'end_date' => '2026-10-10']);
+    CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-09',
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    generateBillingPeriod($schoolClass);
+
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->saved_days)->toBe(0)
+        ->and($bill->alfa_days)->toBe(0)
+        ->and($bill->billable_days)->toBe(0)
+        ->and($bill->gross_amount)->toBe(0);
+});
+
+it('uses category price for active days and global price for billable budaya makan', function (int $categoryPrice, int $expectedGross) {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant($categoryPrice);
+    setBillableCultureMealPrice(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    CateringAttendance::factory()->count(2)->sequence(
+        ['attendance_date' => '2026-10-21'],
+        ['attendance_date' => '2026-10-22'],
+    )->for($member)->create([
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->active_days)->toBe(20)
+        ->and($bill->billable_culture_meal_days)->toBe(2)
+        ->and($bill->billable_days)->toBe(22)
+        ->and($bill->price_per_day)->toBe($categoryPrice)
+        ->and($bill->culture_meal_billable_price)->toBe(16000)
+        ->and($bill->culture_meal_billable_amount)->toBe(32000)
+        ->and($bill->gross_amount)->toBe($expectedGross);
+})->with([
+    'Anak Guru' => [12000, 272000],
+    'Siswa Umum' => [17000, 372000],
+]);
+
+it('bills a month containing only billable budaya makan at the global price', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(12000);
+    setBillableCultureMealPrice(16000);
+    CateringAttendance::factory()->count(3)->sequence(
+        ['attendance_date' => '2026-10-01'],
+        ['attendance_date' => '2026-10-02'],
+        ['attendance_date' => '2026-10-03'],
+    )->for($member)->create([
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+
+    expect($bill->active_days)->toBe(0)
+        ->and($bill->billable_culture_meal_days)->toBe(3)
+        ->and($bill->billable_days)->toBe(3)
+        ->and($bill->culture_meal_billable_amount)->toBe(48000)
+        ->and($bill->gross_amount)->toBe(48000);
+});
+
+it('keeps the old billable culture meal snapshot until explicit resync then preserves payment on a price increase', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(12000);
+    setBillableCultureMealPrice(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    CateringAttendance::factory()->count(2)->sequence(
+        ['attendance_date' => '2026-10-21'],
+        ['attendance_date' => '2026-10-22'],
+    )->for($member)->create([
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 272000);
+
+    setBillableCultureMealPrice(17000);
+
+    expect($bill->fresh()->gross_amount)->toBe(272000)
+        ->and($bill->fresh()->culture_meal_billable_price)->toBe(16000);
+
+    generateBillingPeriod($schoolClass);
+    $bill->refresh();
+
+    expect($bill->culture_meal_billable_price)->toBe(17000)
+        ->and($bill->culture_meal_billable_amount)->toBe(34000)
+        ->and($bill->gross_amount)->toBe(274000)
+        ->and($bill->paidAmount())->toBe(272000)
+        ->and($bill->remainingAmount())->toBe(2000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Partial)
+        ->and($bill->payments()->sole()->is($payment))->toBeTrue();
+});
+
+it('uses existing reconciliation to create credit after a paid billable culture meal price decrease', function () {
+    ['member' => $member, 'class' => $schoolClass] = billingParticipant(12000);
+    setBillableCultureMealPrice(16000);
+    storeBillingAttendance($member, 2026, 10, activeDays: 20);
+    CateringAttendance::factory()->count(2)->sequence(
+        ['attendance_date' => '2026-10-21'],
+        ['attendance_date' => '2026-10-22'],
+    )->for($member)->create([
+        'status' => CateringAttendanceStatus::Alfa,
+        'is_culture_meal_billable' => true,
+    ]);
+    generateBillingPeriod($schoolClass);
+    $bill = CateringBill::query()->sole();
+    $payment = app(CateringPaymentService::class)->record($bill, 272000);
+
+    setBillableCultureMealPrice(15000);
+    generateBillingPeriod($schoolClass);
+    $bill->refresh();
+
+    expect($bill->gross_amount)->toBe(270000)
+        ->and($bill->paidAmount())->toBe(272000)
+        ->and($bill->payment_status)->toBe(CateringBillStatus::Paid)
+        ->and($bill->payments()->sole()->is($payment))->toBeTrue()
+        ->and(CateringCredit::query()->sole()->original_amount)->toBe(2000);
 });

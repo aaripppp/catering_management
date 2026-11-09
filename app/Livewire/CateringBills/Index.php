@@ -8,11 +8,13 @@ use App\Enums\CateringParticipantGroup;
 use App\Enums\SchoolLevel;
 use App\Models\CateringAttendance;
 use App\Models\CateringBill;
+use App\Models\CateringCategory;
 use App\Models\CateringCreditAllocation;
 use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Services\CateringBillingService;
 use App\Services\CateringBillResetService;
+use App\Services\CateringCultureMealSettingService;
 use App\Services\CateringPaymentService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
@@ -287,7 +289,7 @@ class Index extends Component
         $this->dispatch('toast', type: 'danger', message: 'Pembayaran berhasil dihapus.');
     }
 
-    public function render(): View
+    public function render(CateringCultureMealSettingService $settingService): View
     {
         Gate::authorize('viewAny', CateringBill::class);
 
@@ -332,6 +334,31 @@ class Index extends Component
                     ->where('attendance_date', '>=', $periodStart->toDateString())
                     ->where('attendance_date', '<', $periodStart->addMonth()->toDateString())
                     ->where('status', CateringAttendanceStatus::Ikut),
+                'current_alfa_days' => CateringAttendance::query()
+                    ->coveredByMembership()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('catering_member_id', 'catering_bills.catering_member_id')
+                    ->where('attendance_date', '>=', $periodStart->toDateString())
+                    ->where('attendance_date', '<', $periodStart->addMonth()->toDateString())
+                    ->where('status', CateringAttendanceStatus::Alfa),
+                'current_billable_days' => CateringAttendance::query()
+                    ->coveredByMembership()
+                    ->billable()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('catering_member_id', 'catering_bills.catering_member_id')
+                    ->where('attendance_date', '>=', $periodStart->toDateString())
+                    ->where('attendance_date', '<', $periodStart->addMonth()->toDateString()),
+                'current_billable_culture_meal_days' => CateringAttendance::query()
+                    ->coveredByMembership()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('catering_member_id', 'catering_bills.catering_member_id')
+                    ->where('attendance_date', '>=', $periodStart->toDateString())
+                    ->where('attendance_date', '<', $periodStart->addMonth()->toDateString())
+                    ->where('status', CateringAttendanceStatus::Alfa)
+                    ->where('is_culture_meal_billable', true),
+                'current_price_per_day' => CateringCategory::query()
+                    ->select('price_per_day')
+                    ->whereColumn('catering_categories.id', 'catering_bills.catering_category_id'),
             ])
             ->with('member')
             ->withSum('payments as paid_amount', 'amount')
@@ -367,6 +394,7 @@ class Index extends Component
             'jenjangOptions' => SchoolLevel::educationLevels(),
             'paymentStatusOptions' => CateringBillStatus::cases(),
             'yearOptions' => range(now()->year + 1, now()->year - 4),
+            'currentCultureMealBillablePrice' => $settingService->getCultureMealBillablePrice(),
         ]);
     }
 

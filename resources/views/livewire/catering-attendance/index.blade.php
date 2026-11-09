@@ -11,7 +11,7 @@
         openBulkStatusPicker(date, label, event) {
             const rect = event.currentTarget.getBoundingClientRect();
             const width = Math.min(240, window.innerWidth - 16);
-            const estimatedHeight = 230;
+            const estimatedHeight = 300;
             const left = Math.min(
                 Math.max(8, rect.left + (rect.width / 2) - (width / 2)),
                 window.innerWidth - width - 8,
@@ -35,7 +35,7 @@
                 this.$nextTick(() => trigger?.focus());
             }
         },
-        applyBulkStatus(status) {
+        applyBulkStatus(status, isCultureMealBillable = false) {
             const date = this.bulkDate;
 
             if (! date) {
@@ -43,7 +43,7 @@
             }
 
             this.closeBulkStatusPicker();
-            this.$wire.setDateStatus(date, status);
+            this.$wire.setDateStatus(date, status, isCultureMealBillable);
         }
     }"
     x-on:resize.window="closeBulkStatusPicker()"
@@ -74,6 +74,8 @@
             'puasa' => 'scale-[1.03] shadow-md ring-4 ring-indigo-300 ring-offset-2',
             'libur' => 'scale-[1.03] shadow-md ring-4 ring-slate-300 ring-offset-2',
         ];
+        $billableCultureMealClasses = 'border-amber-600 bg-amber-500 text-white hover:bg-amber-600 focus-visible:ring-amber-300';
+        $billableCultureMealSelectedClasses = 'scale-[1.03] shadow-md ring-4 ring-amber-300 ring-offset-2';
         $selectedClass = collect($classOptions)->firstWhere('id', (int) $schoolClassId);
         $selectedGroupLabel = $participantGroupOptions[$participantGroup] ?? 'Kelompok peserta';
         $matrixTitle = $selectedParticipant['name'] ?? ($requiresClassSelection ? ($selectedClass['name'] ?? 'Kelas terpilih') : $selectedGroupLabel);
@@ -429,6 +431,15 @@
                                         @php
                                             $status = $attendance[$participant['id']][$date['date']];
                                             $isEligible = $attendanceEligibility[$participant['id']][$date['date']] ?? false;
+                                            $isBillableCultureMeal = $status === 'alfa'
+                                                && ($cultureMealBillable[$participant['id']][$date['date']] ?? false);
+                                            $cellClasses = $isBillableCultureMeal
+                                                ? $billableCultureMealClasses
+                                                : ($statusClasses[$status] ?? 'border-red-700 bg-red-500 text-white');
+                                            $cellSymbol = $isBillableCultureMeal ? 'B+' : ($statusSymbols[$status] ?? '?');
+                                            $cellLabel = $isBillableCultureMeal
+                                                ? 'Budaya Makan - Terhitung Tagihan'
+                                                : ($statusLabels[$status] ?? 'Status tidak valid');
                                         @endphp
                                         <td
                                             wire:key="attendance-cell-{{ $participant['id'] }}-{{ $date['date'] }}"
@@ -442,11 +453,11 @@
                                                 <button
                                                     type="button"
                                                     wire:click="openStatusMenu({{ $participant['id'] }}, '{{ $date['date'] }}')"
-                                                    class="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 text-xs font-bold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 {{ $statusClasses[$status] ?? 'border-red-700 bg-red-500 text-white' }}"
-                                                    title="{{ $participant['name'] }} - {{ $date['date'] }}: {{ $statusLabels[$status] ?? 'Status tidak valid' }}"
-                                                    aria-label="Ubah status {{ $participant['name'] }} tanggal {{ $date['day'] }} dari {{ $statusLabels[$status] ?? 'status tidak valid' }}"
+                                                    class="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 text-xs font-bold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 {{ $cellClasses }}"
+                                                    title="{{ $participant['name'] }} - {{ $date['date'] }}: {{ $cellLabel }}"
+                                                    aria-label="Ubah status {{ $participant['name'] }} tanggal {{ $date['day'] }} dari {{ $cellLabel }}"
                                                 >
-                                                    {{ $statusSymbols[$status] ?? '?' }}
+                                                    {{ $cellSymbol }}
                                                 </button>
                                             @else
                                                 <span
@@ -514,6 +525,16 @@
                                 <span>{{ $statusLabels[$status->value] }}</span>
                             </button>
                         @endforeach
+                        <button
+                            type="button"
+                            x-on:click="applyBulkStatus('alfa', true)"
+                            class="flex min-h-12 flex-col items-center justify-center rounded-lg border-2 border-amber-600 bg-amber-100 px-1 py-1.5 text-[10px] font-semibold leading-tight text-amber-950 shadow-sm transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-300 focus-visible:ring-offset-1"
+                            role="menuitem"
+                            title="Budaya Makan yang dihitung ke tagihan"
+                        >
+                            <span class="text-sm font-bold">B+</span>
+                            <span>BM Tagihan</span>
+                        </button>
                     </div>
                 </div>
             </template>
@@ -524,7 +545,6 @@
         @php
             $editingParticipant = collect($participants)->firstWhere('id', $editingMemberId);
             $editingDateInfo = collect($dates)->firstWhere('date', $editingDate);
-            $editingStatus = $attendance[$editingMemberId][$editingDate];
         @endphp
         <div x-scroll-lock x-on:keydown.escape.window="$wire.closeStatusMenu()" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-status-title">
             <div wire:click="closeStatusMenu" class="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" aria-hidden="true"></div>
@@ -543,21 +563,41 @@
                     </button>
                 </div>
 
-                <div class="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto overscroll-contain p-5 sm:grid-cols-3">
-                    @foreach ($statusOptions as $status)
+                <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+                    <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        @foreach ($statusOptions as $status)
+                            <button
+                                type="button"
+                                wire:click="saveEditingStatus(@js($status->value), false)"
+                                wire:loading.attr="disabled"
+                                wire:target="saveEditingStatus"
+                                @class([
+                                    'flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70',
+                                    $statusClasses[$status->value],
+                                    $statusSelectedClasses[$status->value] => $editingStatus === $status->value
+                                        && ($status->value !== 'alfa' || ! $editingCultureMealBillable),
+                                ])
+                            >
+                                <span class="text-base font-bold">{{ $status->shorthand() }}</span>
+                                <span>{{ $status->label() }}</span>
+                            </button>
+                        @endforeach
+
                         <button
                             type="button"
-                            wire:click="setCellStatus({{ $editingMemberId }}, '{{ $editingDate }}', '{{ $status->value }}')"
+                            wire:click="saveEditingStatus('alfa', true)"
+                            wire:loading.attr="disabled"
+                            wire:target="saveEditingStatus"
                             @class([
-                                'flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2',
-                                $statusClasses[$status->value],
-                                $statusSelectedClasses[$status->value] => $editingStatus === $status->value,
+                                'col-span-2 flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70 sm:col-span-3',
+                                $billableCultureMealClasses,
+                                $billableCultureMealSelectedClasses => $editingStatus === 'alfa' && $editingCultureMealBillable,
                             ])
                         >
-                            <span class="text-base font-bold">{{ $status->shorthand() }}</span>
-                            <span>{{ $status->label() }}</span>
+                            <span class="text-base font-bold">B+</span>
+                            <span>Budaya Makan Tagihan</span>
                         </button>
-                    @endforeach
+                    </div>
                 </div>
             </div>
         </div>

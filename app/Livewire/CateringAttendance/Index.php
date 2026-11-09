@@ -65,6 +65,10 @@ class Index extends Component
 
     /** @var array<int, array<string, bool>> */
     #[Locked]
+    public array $cultureMealBillable = [];
+
+    /** @var array<int, array<string, bool>> */
+    #[Locked]
     public array $attendanceEligibility = [];
 
     /**
@@ -86,6 +90,10 @@ class Index extends Component
     public ?int $editingMemberId = null;
 
     public ?string $editingDate = null;
+
+    public string $editingStatus = '';
+
+    public bool $editingCultureMealBillable = false;
 
     #[Locked]
     public ?int $loadedClassId = null;
@@ -226,13 +234,14 @@ class Index extends Component
             ->all();
 
         $attendanceByMember = [];
+        $cultureMealBillableByMember = [];
         $participantIds = array_column($participants, 'id');
         $periodsByMember = [];
 
         if ($participantIds !== []) {
             // One query for the whole month, never one per participant or cell.
             $savedAttendance = CateringAttendance::query()
-                ->select(['catering_member_id', 'attendance_date', 'status'])
+                ->select(['catering_member_id', 'attendance_date', 'status', 'is_culture_meal_billable'])
                 ->whereIn('catering_member_id', $participantIds)
                 ->where('attendance_date', '>=', $start->toDateString())
                 ->where('attendance_date', '<', $end->addDay()->toDateString())
@@ -240,6 +249,7 @@ class Index extends Component
 
             foreach ($savedAttendance as $saved) {
                 $attendanceByMember[$saved->catering_member_id][$saved->attendance_date->toDateString()] = $saved->status->value;
+                $cultureMealBillableByMember[$saved->catering_member_id][$saved->attendance_date->toDateString()] = $saved->is_culture_meal_billable;
             }
 
             $periodRows = CateringMemberPeriod::query()
@@ -260,6 +270,7 @@ class Index extends Component
         }
 
         $attendance = [];
+        $cultureMealBillable = [];
         $attendanceEligibility = [];
 
         foreach ($participants as $participant) {
@@ -272,6 +283,8 @@ class Index extends Component
                 $attendance[$participant['id']][$date['date']] = $isCovered
                     ? ($attendanceByMember[$participant['id']][$date['date']] ?? $this->defaultStatus($date))
                     : null;
+                $cultureMealBillable[$participant['id']][$date['date']] = $isCovered
+                    && ($cultureMealBillableByMember[$participant['id']][$date['date']] ?? false);
             }
         }
 
@@ -285,6 +298,7 @@ class Index extends Component
         $this->participants = $participants;
         $this->dates = $dates;
         $this->attendance = $attendance;
+        $this->cultureMealBillable = $cultureMealBillable;
         $this->attendanceEligibility = $attendanceEligibility;
         $this->memberPeriods = $periodsByMember;
         $this->loadedClassId = $schoolClass?->id;
@@ -311,12 +325,66 @@ class Index extends Component
 
         $this->editingMemberId = $memberId;
         $this->editingDate = $date;
+        $this->editingStatus = (string) $this->attendance[$memberId][$date];
+        $this->editingCultureMealBillable = $this->cultureMealBillable[$memberId][$date] ?? false;
     }
 
     public function closeStatusMenu(): void
     {
         $this->editingMemberId = null;
         $this->editingDate = null;
+        $this->editingStatus = '';
+        $this->editingCultureMealBillable = false;
+    }
+
+    public function selectEditingStatus(string $status): void
+    {
+        $validated = Validator::make(
+            ['status' => $status],
+            ['status' => ['required', Rule::enum(CateringAttendanceStatus::class)]],
+        )->validate();
+
+        $this->editingStatus = $validated['status'];
+
+        if ($this->editingStatus !== CateringAttendanceStatus::Alfa->value) {
+            $this->editingCultureMealBillable = false;
+        }
+    }
+
+    public function saveEditingCell(CateringMembershipService $membershipService): void
+    {
+        if ($this->editingMemberId === null || $this->editingDate === null) {
+            return;
+        }
+
+        $this->persistCellStatus(
+            $this->editingMemberId,
+            $this->editingDate,
+            $this->editingStatus,
+            $this->editingCultureMealBillable,
+            $membershipService,
+        );
+    }
+
+    /**
+     * Persist one direct modal choice, keeping status and billing flag atomic.
+     */
+    public function saveEditingStatus(
+        string $status,
+        bool $isCultureMealBillable,
+        CateringMembershipService $membershipService,
+    ): void {
+        if ($this->editingMemberId === null || $this->editingDate === null) {
+            return;
+        }
+
+        $this->persistCellStatus(
+            $this->editingMemberId,
+            $this->editingDate,
+            $status,
+            $isCultureMealBillable,
+            $membershipService,
+        );
     }
 
     /**
@@ -329,6 +397,16 @@ class Index extends Component
         int $memberId,
         string $date,
         string $status,
+        CateringMembershipService $membershipService,
+    ): void {
+        $this->persistCellStatus($memberId, $date, $status, false, $membershipService);
+    }
+
+    private function persistCellStatus(
+        int $memberId,
+        string $date,
+        string $status,
+        bool $isCultureMealBillable,
         CateringMembershipService $membershipService,
     ): void {
         abort_unless(auth()->check(), 403);
@@ -344,11 +422,16 @@ class Index extends Component
             ['status' => ['required', Rule::enum(CateringAttendanceStatus::class)]],
         )->validate();
 
+        $isCultureMealBillable = $validated['status'] === CateringAttendanceStatus::Alfa->value
+            && $isCultureMealBillable;
+
         $previous = $this->attendance[$memberId][$date] ?? null;
+        $previousCultureMealBillable = $this->cultureMealBillable[$memberId][$date] ?? false;
         $this->closeStatusMenu();
 
         // Reflect the choice immediately, then roll it back if the write fails.
         $this->attendance[$memberId][$date] = $validated['status'];
+        $this->cultureMealBillable[$memberId][$date] = $isCultureMealBillable;
         $this->saving = true;
 
         try {
@@ -356,11 +439,13 @@ class Index extends Component
                 'catering_member_id' => $memberId,
                 'attendance_date' => $date,
                 'status' => $validated['status'],
+                'is_culture_meal_billable' => $isCultureMealBillable,
             ]]);
         } catch (Throwable $exception) {
             if ($previous !== null) {
                 $this->attendance[$memberId][$date] = $previous;
             }
+            $this->cultureMealBillable[$memberId][$date] = $previousCultureMealBillable;
 
             $this->saving = false;
             $this->reportSaveFailure($exception);
@@ -378,7 +463,7 @@ class Index extends Component
      * Written as a single bulk upsert so the cost does not scale with the number
      * of participants in the class.
      */
-    public function setDateStatus(string $date, string $status): void
+    public function setDateStatus(string $date, string $status, bool $isCultureMealBillable = false): void
     {
         abort_unless(auth()->check(), 403);
 
@@ -387,6 +472,9 @@ class Index extends Component
             ['status' => ['required', Rule::enum(CateringAttendanceStatus::class)]],
         )->validate();
 
+        $isCultureMealBillable = $validated['status'] === CateringAttendanceStatus::Alfa->value
+            && $isCultureMealBillable;
+
         if (! in_array($date, array_column($this->dates, 'date'), true)) {
             throw ValidationException::withMessages([
                 'date' => 'Tanggal tidak termasuk dalam matriks yang sedang dibuka.',
@@ -394,6 +482,7 @@ class Index extends Component
         }
 
         $previous = [];
+        $previousCultureMealBillable = [];
         $payload = [];
         $coveredMemberIds = $this->freshCoveredMemberIds($date);
 
@@ -403,11 +492,14 @@ class Index extends Component
                 continue;
             }
             $previous[$memberId] = $this->attendance[$memberId][$date] ?? null;
+            $previousCultureMealBillable[$memberId] = $this->cultureMealBillable[$memberId][$date] ?? false;
             $this->attendance[$memberId][$date] = $validated['status'];
+            $this->cultureMealBillable[$memberId][$date] = $isCultureMealBillable;
             $payload[] = [
                 'catering_member_id' => $memberId,
                 'attendance_date' => $date,
                 'status' => $validated['status'],
+                'is_culture_meal_billable' => $isCultureMealBillable,
             ];
         }
 
@@ -424,6 +516,7 @@ class Index extends Component
                 if ($previousStatus !== null) {
                     $this->attendance[$memberId][$date] = $previousStatus;
                 }
+                $this->cultureMealBillable[$memberId][$date] = $previousCultureMealBillable[$memberId];
             }
 
             $this->saving = false;
@@ -818,6 +911,7 @@ class Index extends Component
         $this->participants = [];
         $this->dates = [];
         $this->attendance = [];
+        $this->cultureMealBillable = [];
         $this->attendanceEligibility = [];
         $this->memberPeriods = [];
         $this->loadedClassId = null;
@@ -956,7 +1050,7 @@ class Index extends Component
     /**
      * Persist the given attendance rows in as few queries as possible.
      *
-     * @param  array<int, array{catering_member_id: int, attendance_date: string, status: string}>  $rows
+     * @param  array<int, array{catering_member_id: int, attendance_date: string, status: string, is_culture_meal_billable: bool}>  $rows
      */
     private function writeAttendance(array $rows): void
     {
@@ -972,6 +1066,8 @@ class Index extends Component
                     'catering_member_id' => $row['catering_member_id'],
                     'attendance_date' => $this->attendanceDateForStorage($row['attendance_date']),
                     'status' => $row['status'],
+                    'is_culture_meal_billable' => $row['status'] === CateringAttendanceStatus::Alfa->value
+                        && $row['is_culture_meal_billable'],
                     'created_at' => $now,
                     'updated_at' => $now,
                 ], $chunk);
@@ -979,7 +1075,7 @@ class Index extends Component
                 CateringAttendance::query()->upsert(
                     $payload,
                     ['catering_member_id', 'attendance_date'],
-                    ['status', 'updated_at'],
+                    ['status', 'is_culture_meal_billable', 'updated_at'],
                 );
             }
         });

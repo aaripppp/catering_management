@@ -464,7 +464,7 @@
         </div>
         <div class="meta-row">
             <span class="meta-key">Harga / Porsi</span>
-            <span class="meta-value">{{ $pricePerDayFormatted }}</span>
+            <span class="meta-value">{{ $pricePerDayFormatted }}{{ $billableCultureMealDays > 0 ? ' / BM '.$cultureMealBillablePriceFormatted : '' }}</span>
         </div>
         @if ($paymentStatusLabel)
             <div class="meta-row">
@@ -522,7 +522,7 @@
         <th style="width: 6%;">{{ CateringAttendanceStatus::Ujian->label() }}</th>
         <th style="width: 6%;">{{ CateringAttendanceStatus::EventUnit->label() }}</th>
         <th style="width: 6%;">{{ CateringAttendanceStatus::Puasa->label() }}</th>
-        <th style="width: 20%;">Harga / Porsi</th>
+        <th style="width: 20%;">Rincian Tagihan</th>
         <th class="total-head" style="width: 32%;">Total Tagihan Bulan Ini</th>
     </tr>
     <tr>
@@ -534,7 +534,12 @@
         <td>{{ $countUjian }}</td>
         <td>{{ $countEventUnit }}</td>
         <td>{{ $countPuasa }}</td>
-        <td class="price">{{ $pricePerDayFormatted }}</td>
+        <td class="price">
+            Aktif: {{ $activeDays }} × {{ $pricePerDayFormatted }} = {{ $activeAmountFormatted }}
+            @if ($billableCultureMealDays > 0)
+                <br>Budaya Makan: {{ $billableCultureMealDays }} × {{ $cultureMealBillablePriceFormatted }} = {{ $cultureMealBillableAmountFormatted }}
+            @endif
+        </td>
         <td class="total-cell">{{ $quantity }} hari &middot; {{ $totalFormatted }}</td>
     </tr>
 </table>
@@ -604,8 +609,8 @@
 
 <div class="notes">
     <ul>
-        <li>Hanya status <strong>{{ CateringAttendanceStatus::Ikut->label() }}</strong> yang dihitung.</li>
-        <li>{{ CateringAttendanceStatus::Sakit->label() }}, {{ CateringAttendanceStatus::Izin->label() }}, {{ CateringAttendanceStatus::Alfa->label() }}, {{ CateringAttendanceStatus::TidakIkut->label() }}, {{ CateringAttendanceStatus::Ujian->label() }}, {{ CateringAttendanceStatus::EventUnit->label() }}, dan {{ CateringAttendanceStatus::Puasa->label() }} tidak ditagihkan.</li>
+        <li>Tagihan dihitung berdasarkan aturan perhitungan catering yang berlaku.</li>
+        <li>Status yang tidak termasuk perhitungan tidak menambah tagihan.</li>
         <li>Dihitung dari data absensi catering yang telah disimpan untuk periode {{ $periodLabel }}.</li>
         <li>Baris berstatus {{ CateringAttendanceStatus::Libur->label() }} tidak ditampilkan; status lain tetap ditampilkan tanpa membedakan hari.</li>
     </ul>

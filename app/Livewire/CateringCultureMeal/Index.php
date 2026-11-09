@@ -43,6 +43,10 @@ class Index extends Component
 
     public string $culture_meal_price = '';
 
+    public bool $showBillablePriceModal = false;
+
+    public string $culture_meal_billable_price = '';
+
     public function mount(): void
     {
         Gate::authorize('viewCateringCultureMeal');
@@ -190,6 +194,41 @@ class Index extends Component
         $this->closePriceModal();
     }
 
+    public function editCultureMealBillablePrice(CateringCultureMealSettingService $settingService): void
+    {
+        Gate::authorize('updateCateringCultureMeal');
+
+        $this->culture_meal_billable_price = (string) $settingService->getCultureMealBillablePrice();
+        $this->resetValidation('culture_meal_billable_price');
+        $this->showBillablePriceModal = true;
+    }
+
+    public function closeBillablePriceModal(): void
+    {
+        $this->showBillablePriceModal = false;
+        $this->culture_meal_billable_price = '';
+        $this->resetValidation('culture_meal_billable_price');
+    }
+
+    public function saveCultureMealBillablePrice(CateringCultureMealSettingService $settingService): void
+    {
+        Gate::authorize('updateCateringCultureMeal');
+
+        $validated = $this->validate([
+            'culture_meal_billable_price' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $settingService->updateCultureMealBillablePrice((int) $validated['culture_meal_billable_price']);
+
+        $this->dispatch(
+            'toast',
+            type: 'success',
+            message: 'Harga Budaya Makan Tagihan berhasil diperbarui.',
+        );
+
+        $this->closeBillablePriceModal();
+    }
+
     public function render(
         CateringCultureMealMonitoringService $monitoringService,
         CateringCultureMealIncomeService $incomeService,
@@ -204,6 +243,7 @@ class Index extends Component
 
         $monitoring = $monitoringService->monitor($this->month, $this->year);
         $cultureMealPrice = $settingService->getCultureMealPrice();
+        $cultureMealBillablePrice = $settingService->getCultureMealBillablePrice();
         $totalRecordedBill = $monitoring['total'] * $cultureMealPrice;
 
         return view('livewire.catering-culture-meal.index', [
@@ -214,6 +254,7 @@ class Index extends Component
             'totalRecordedBill' => $totalRecordedBill,
             'totalRecordedBillLabel' => 'Rp '.Number::format($totalRecordedBill, 0, null, 'id'),
             'cultureMealPriceLabel' => 'Rp '.Number::format($cultureMealPrice, 0, null, 'id'),
+            'cultureMealBillablePriceLabel' => 'Rp '.Number::format($cultureMealBillablePrice, 0, null, 'id'),
             'classOptions' => $this->classOptions(),
             'periodLabel' => $this->periodLabel(),
             'monthOptions' => $this->monthOptions(),

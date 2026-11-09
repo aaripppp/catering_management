@@ -177,6 +177,17 @@ it('counts budaya makan as zero portions while preserving the alfa value', funct
         ->and(recapStoredStatus($student, RECAP_DATE))->toBe(CateringAttendanceStatus::Alfa);
 });
 
+it('counts billable budaya makan as zero operational portions', function () {
+    $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
+
+    $student = recapStudent('Siswa Budaya Makan Tagihan', $class);
+    $attendance = saveAttendance($student, RECAP_DATE, CateringAttendanceStatus::Alfa);
+    $attendance->update(['is_culture_meal_billable' => true]);
+
+    expect(recapFor(RECAP_DATE)['totalPortions'])->toBe(0)
+        ->and($attendance->fresh()->is_culture_meal_billable)->toBeTrue();
+});
+
 it('excludes tidak ikut from the portion total and counts it separately', function () {
     $class = SchoolClass::factory()->create(['name' => '1A', 'level' => '1']);
 

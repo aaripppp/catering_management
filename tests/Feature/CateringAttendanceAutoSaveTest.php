@@ -540,6 +540,127 @@ it('saves the budaya makan bulk choice as alfa only in the loaded scope', functi
     expect(storedStatus($outsideMember->id, '2026-09-01'))->toBe(CateringAttendanceStatus::Ikut);
 });
 
+it('saves non billable budaya makan directly from the status modal', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+
+    autoSaveMatrix($schoolClass)
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Alfa->value, false)
+        ->assertHasNoErrors()
+        ->assertSet("attendance.{$member->id}.2026-09-01", CateringAttendanceStatus::Alfa->value)
+        ->assertSet("cultureMealBillable.{$member->id}.2026-09-01", false);
+
+    $attendance = CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->sole();
+
+    expect($attendance->status)->toBe(CateringAttendanceStatus::Alfa)
+        ->and($attendance->is_culture_meal_billable)->toBeFalse();
+});
+
+it('saves billable budaya makan status and flag atomically from the status modal', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+
+    autoSaveMatrix($schoolClass)
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Alfa->value, true)
+        ->assertHasNoErrors()
+        ->assertSet("attendance.{$member->id}.2026-09-01", CateringAttendanceStatus::Alfa->value)
+        ->assertSet("cultureMealBillable.{$member->id}.2026-09-01", true);
+
+    $attendance = CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->sole();
+
+    expect($attendance->status)->toBe(CateringAttendanceStatus::Alfa)
+        ->and($attendance->is_culture_meal_billable)->toBeTrue();
+});
+
+it('clears the billable flag when a non alfa status is chosen directly from the status modal', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+    $component = autoSaveMatrix($schoolClass);
+
+    $component
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Alfa->value, true);
+
+    $component
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Sakit->value, true)
+        ->assertHasNoErrors()
+        ->assertSet("cultureMealBillable.{$member->id}.2026-09-01", false);
+
+    $attendance = CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->sole();
+
+    expect($attendance->status)->toBe(CateringAttendanceStatus::Sakit)
+        ->and($attendance->is_culture_meal_billable)->toBeFalse();
+});
+
+it('differentiates normal and billable budaya makan in the attendance grid', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass, 'Siswa Grid');
+    $component = autoSaveMatrix($schoolClass);
+
+    $normalHtml = $component
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Alfa->value, false)
+        ->assertHasNoErrors()
+        ->html();
+
+    expect($normalHtml)->toMatch(
+        '/<button[^>]*class="[^"]*border-red-700 bg-red-500[^"]*"[^>]*title="Siswa Grid - 2026-09-01: Budaya Makan"[^>]*>\s*B\s*<\/button>/s',
+    );
+
+    $billableHtml = $component
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->call('saveEditingStatus', CateringAttendanceStatus::Alfa->value, true)
+        ->assertHasNoErrors()
+        ->assertDontSeeHtml('Terhitung Tagihan</')
+        ->html();
+
+    expect($billableHtml)->toMatch(
+        '/<button[^>]*class="[^"]*border-amber-600 bg-amber-500[^"]*"[^>]*title="Siswa Grid - 2026-09-01: Budaya Makan - Terhitung Tagihan"[^>]*>\s*B\+\s*<\/button>/s',
+    );
+});
+
+it('defaults bulk budaya makan to non billable and clears the flag for non alfa statuses', function () {
+    $schoolClass = autoSaveClass();
+    $member = autoSaveMember($schoolClass);
+    $component = autoSaveMatrix($schoolClass);
+
+    $component->call('setDateStatus', '2026-09-01', CateringAttendanceStatus::Alfa->value, true);
+
+    expect((bool) CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->value('is_culture_meal_billable'))->toBeTrue();
+
+    $component->call('setDateStatus', '2026-09-01', CateringAttendanceStatus::Sakit->value, true);
+
+    $attendance = CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->sole();
+
+    expect($attendance->status)->toBe(CateringAttendanceStatus::Sakit)
+        ->and($attendance->is_culture_meal_billable)->toBeFalse();
+
+    $component->call('setDateStatus', '2026-09-01', CateringAttendanceStatus::Alfa->value);
+
+    expect((bool) CateringAttendance::query()
+        ->where('catering_member_id', $member->id)
+        ->whereDate('attendance_date', '2026-09-01')
+        ->value('is_culture_meal_billable'))->toBeFalse();
+});
+
 it('leaves the neighbouring dates untouched when a whole date changes', function () {
     $schoolClass = autoSaveClass();
     $member = autoSaveMember($schoolClass);

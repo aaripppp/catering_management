@@ -1,14 +1,18 @@
 <?php
 
+use App\Enums\CateringAttendanceStatus;
 use App\Enums\CateringBillStatus;
 use App\Enums\CateringParticipantGroup;
 use App\Livewire\CateringMonthlyReport\Index as CateringMonthlyReport;
+use App\Models\CateringAttendance;
 use App\Models\CateringBill;
 use App\Models\CateringCategory;
 use App\Models\CateringMember;
+use App\Models\CateringMemberPeriod;
 use App\Models\CateringPayment;
 use App\Models\SchoolClass;
 use App\Models\User;
+use App\Services\CateringBillingService;
 use App\Services\CateringMonthlyReportExportService;
 use App\Services\CateringMonthlyReportService;
 use App\Services\CateringPaymentService;
@@ -163,6 +167,49 @@ it('summarizes monthly bill cash credit outstanding overpayment and statuses sep
         'partial_count' => 1,
         'unpaid_count' => 1,
     ]);
+});
+
+it('keeps the monthly report on the bill snapshot until an explicit bill sync', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $category = CateringCategory::factory()->student()->create(['price_per_day' => 16000]);
+    $member = CateringMember::factory()->create([
+        'name' => 'Siswa Budaya Makan',
+        'school_class_id' => $schoolClass->id,
+        'catering_category_id' => $category->id,
+    ]);
+    CateringMemberPeriod::create([
+        'catering_member_id' => $member->id,
+        'start_date' => '2026-10-01',
+        'end_date' => null,
+    ]);
+
+    foreach (range(1, 20) as $day) {
+        CateringAttendance::factory()->for($member)->create([
+            'attendance_date' => sprintf('2026-10-%02d', $day),
+            'status' => CateringAttendanceStatus::Ikut,
+        ]);
+    }
+
+    $cultureMeal = CateringAttendance::factory()->for($member)->create([
+        'attendance_date' => '2026-10-21',
+        'status' => CateringAttendanceStatus::Alfa,
+    ]);
+
+    $filters = monthlyReportFilters(['participantGroup' => CateringParticipantGroup::Student->value]);
+    $billingService = app(CateringBillingService::class);
+    $reportService = app(CateringMonthlyReportService::class);
+
+    $billingService->generate(2026, 10, CateringParticipantGroup::Student, $schoolClass);
+
+    expect($reportService->summary($filters)['gross_amount'])->toBe(320000);
+
+    $cultureMeal->update(['is_culture_meal_billable' => true]);
+
+    expect($reportService->summary($filters)['gross_amount'])->toBe(320000);
+
+    $billingService->generate(2026, 10, CateringParticipantGroup::Student, $schoolClass);
+
+    expect($reportService->summary($filters)['gross_amount'])->toBe(336000);
 });
 
 it('applies period group jenjang and class filters to the same financial scope', function () {

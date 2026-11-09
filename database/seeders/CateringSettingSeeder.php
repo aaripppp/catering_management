@@ -17,5 +17,10 @@ class CateringSettingSeeder extends Seeder
             ['key' => CateringCultureMealSettingService::CULTURE_MEAL_PRICE_KEY],
             ['value' => (string) CateringCultureMealSettingService::DEFAULT_CULTURE_MEAL_PRICE],
         );
+
+        CateringSetting::query()->firstOrCreate(
+            ['key' => CateringCultureMealSettingService::CULTURE_MEAL_BILLABLE_PRICE_KEY],
+            ['value' => (string) CateringCultureMealSettingService::DEFAULT_CULTURE_MEAL_BILLABLE_PRICE],
+        );
     }
 }

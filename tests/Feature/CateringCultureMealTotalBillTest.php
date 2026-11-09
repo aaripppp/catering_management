@@ -57,7 +57,7 @@ it('calculates one recorded attendance at the reference price', function () {
     totalBillAttendance($member, '2026-10-10');
 
     totalBillPage(User::factory()->admin()->create())
-        ->assertSee('Total Tagihan Tercatat')
+        ->assertSee('Nilai Referensi Tercatat')
         ->assertSee('1 × Rp 16.000')
         ->assertSeeHtml(totalBillCard('Rp 16.000'));
 });
@@ -199,7 +199,7 @@ it('never creates bill, payment, credit, or unit bill rows', function () {
     totalBillAttendance($member, '2026-10-10');
 
     totalBillPage($admin)
-        ->assertSee('Total Tagihan Tercatat')
+        ->assertSee('Nilai Referensi Tercatat')
         ->call('editCultureMealPrice')
         ->set('culture_meal_price', '18000')
         ->call('saveCultureMealPrice')

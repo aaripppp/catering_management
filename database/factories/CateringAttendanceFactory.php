@@ -23,6 +23,7 @@ class CateringAttendanceFactory extends Factory
             'catering_member_id' => CateringMember::factory(),
             'attendance_date' => $this->faker->date(),
             'status' => $this->faker->randomElement(CateringAttendanceStatus::cases()),
+            'is_culture_meal_billable' => false,
         ];
     }
 }

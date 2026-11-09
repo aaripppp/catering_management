@@ -340,6 +340,32 @@ it('reloads all previously saved statuses for the same class and month', functio
         ->assertSet("attendance.{$member->id}.2026-09-04", 'tidak_ikut');
 });
 
+it('offers ten direct attendance choices without a separate billing checkbox', function () {
+    $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
+    $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
+
+    openCateringAttendanceMatrix(User::factory()->admin()->create(), $schoolClass)
+        ->call('openStatusMenu', $member->id, '2026-09-01')
+        ->assertSee('Aktif')
+        ->assertSee('Sakit')
+        ->assertSee('Izin')
+        ->assertSee('Budaya Makan')
+        ->assertSee('Off')
+        ->assertSee('Ujian')
+        ->assertSee('Event Unit')
+        ->assertSee('Puasa')
+        ->assertSee('Libur')
+        ->assertSee('Budaya Makan Tagihan')
+        ->assertDontSee('Budaya Makan Terhitung Tagihan')
+        ->assertSeeHtml("wire:click=\"saveEditingStatus('alfa', false)\"")
+        ->assertSeeHtml("wire:click=\"saveEditingStatus('alfa', true)\"")
+        ->assertSeeHtml('<span class="text-base font-bold">B+</span>')
+        ->assertSeeHtml('border-amber-600 bg-amber-500 text-white')
+        ->assertDontSee('Hitung ke tagihan')
+        ->assertDontSeeHtml('type="checkbox"')
+        ->assertDontSee('Terapkan');
+});
+
 it('renders active and off in the attendance modal with the existing colors', function () {
     $schoolClass = SchoolClass::factory()->create(['name' => '7A', 'level' => '7']);
     $member = CateringMember::factory()->create(['school_class_id' => $schoolClass->id]);
