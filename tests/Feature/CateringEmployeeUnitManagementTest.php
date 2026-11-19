@@ -169,6 +169,140 @@ it('allows an admin to edit every unit field and updates list order', function (
     ]);
 });
 
+it('persists a new price when editing an existing unit', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 13000]);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->assertSet('price_per_person', '13000')
+        ->set('price_per_person', '14000')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('catering_employee_units', [
+        'id' => $unit->id,
+        'price_per_person' => 14000,
+    ]);
+});
+
+it('leaves other unit fields unchanged when only the price is edited', function () {
+    $unit = CateringEmployeeUnit::factory()->create([
+        'name' => 'SD',
+        'price_per_person' => 13000,
+        'default_employee_subsidy_rate' => 4000,
+        'default_student_subsidy_rate' => 1000,
+        'is_active' => false,
+        'sort_order' => 7,
+    ]);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->assertSet('default_employee_subsidy_rate', '4000')
+        ->assertSet('default_student_subsidy_rate', '1000')
+        ->assertSet('sort_order', '7')
+        ->assertSet('is_active', false)
+        ->set('price_per_person', '14000')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('catering_employee_units', [
+        'id' => $unit->id,
+        'name' => 'SD',
+        'price_per_person' => 14000,
+        'default_employee_subsidy_rate' => 4000,
+        'default_student_subsidy_rate' => 1000,
+        'is_active' => false,
+        'sort_order' => 7,
+    ]);
+});
+
+it('persists the price and both subsidy rates together', function () {
+    $unit = CateringEmployeeUnit::factory()->create([
+        'price_per_person' => 13000,
+        'default_employee_subsidy_rate' => 4000,
+        'default_student_subsidy_rate' => 1000,
+    ]);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->set('price_per_person', '16000')
+        ->set('default_employee_subsidy_rate', '5000')
+        ->set('default_student_subsidy_rate', '2000')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('catering_employee_units', [
+        'id' => $unit->id,
+        'price_per_person' => 16000,
+        'default_employee_subsidy_rate' => 5000,
+        'default_student_subsidy_rate' => 2000,
+    ]);
+});
+
+it('rejects an empty price and keeps the stored price', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 13000]);
+
+    Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->set('price_per_person', '')
+        ->call('save')
+        ->assertHasErrors(['price_per_person' => 'required']);
+
+    $this->assertDatabaseHas('catering_employee_units', [
+        'id' => $unit->id,
+        'price_per_person' => 13000,
+    ]);
+});
+
+it('loads the updated price when the edit modal is reopened', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 13000]);
+
+    $component = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->set('price_per_person', '14000')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showFormModal', false);
+
+    $component->call('edit', $unit->id)
+        ->assertSet('showFormModal', true)
+        ->assertSet('price_per_person', '14000');
+});
+
+it('keeps the modal fields and actions inside the same form and panel', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 13000]);
+
+    $html = Livewire::actingAs(User::factory()->admin()->create())
+        ->test(CateringEmployeeUnitIndex::class)
+        ->call('edit', $unit->id)
+        ->html();
+
+    $document = new DOMDocument;
+    $document->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+    $xpath = new DOMXPath($document);
+
+    $priceInput = $xpath->query('//input[@id="unit-catering-price"]')->item(0);
+    $saveButton = $xpath->query('//button[@type="submit"]')->item(0);
+    $cancelButton = $xpath->query('//button[normalize-space(.)="Batal"]')->item(0);
+
+    expect($priceInput)->not->toBeNull()
+        ->and($saveButton)->not->toBeNull()
+        ->and($cancelButton)->not->toBeNull();
+
+    $priceForm = $xpath->query('ancestor::form[1]', $priceInput)->item(0);
+    $pricePanel = $xpath->query('ancestor::div[contains(@class, "max-w-lg")][1]', $priceInput)->item(0);
+
+    expect($priceForm)->not->toBeNull()
+        ->and($xpath->query('ancestor::form[1]', $saveButton)->item(0))->toBe($priceForm)
+        ->and($xpath->query('ancestor::form[1]', $cancelButton)->item(0))->toBe($priceForm)
+        ->and($xpath->query('ancestor::div[contains(@class, "max-w-lg")][1]', $saveButton)->item(0))->toBe($pricePanel);
+});
+
 it('allows an admin to deactivate and reactivate a unit', function () {
     $unit = CateringEmployeeUnit::factory()->create(['is_active' => true]);
     $admin = User::factory()->admin()->create();

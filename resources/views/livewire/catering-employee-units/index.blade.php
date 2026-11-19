@@ -89,34 +89,33 @@
                             @error('name')<p class="field-error">{{ $message }}</p>@enderror
                         </div>
 
-                            <div>
-                                <label for="unit-catering-price" class="label">Harga per Orang</label>
-                                <div class="relative">
-                                    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
-                                    <input id="unit-catering-price" type="number" inputmode="numeric" min="0" step="1" wire:model="price_per_person" class="input pl-10" placeholder="13000" />
-                                </div>
-                                @error('price_per_person')<p class="field-error">{{ $message }}</p>@enderror
-                            </div>
-                            <div class="grid gap-4 sm:grid-cols-2">
-                                <div>
-                                    <label for="unit-default-employee-subsidy" class="label">Default Subsidi Pegawai / Porsi</label>
-                                    <div class="relative">
-                                        <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
-                                        <input id="unit-default-employee-subsidy" type="number" inputmode="numeric" min="0" step="1" wire:model="default_employee_subsidy_rate" class="input pl-10" placeholder="4000" />
-                                    </div>
-                                    @error('default_employee_subsidy_rate')<p class="field-error">{{ $message }}</p>@enderror
-                                </div>
-                                <div>
-                                    <label for="unit-default-student-subsidy" class="label">Default Subsidi Siswa / Siswa</label>
-                                    <div class="relative">
-                                        <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
-                                        <input id="unit-default-student-subsidy" type="number" inputmode="numeric" min="0" step="1" wire:model="default_student_subsidy_rate" class="input pl-10" placeholder="1000" />
-                                    </div>
-                                    @error('default_student_subsidy_rate')<p class="field-error">{{ $message }}</p>@enderror
-                                </div>
+                        <div>
+                            <label for="unit-catering-price" class="label">Harga per Orang</label>
+                            <div class="relative">
+                                <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
+                                <input id="unit-catering-price" type="number" inputmode="numeric" min="0" step="1" wire:model="price_per_person" class="input pl-10" placeholder="13000" />
                             </div>
                             <p class="mt-1.5 text-xs text-slate-500">Masukkan angka penuh tanpa titik atau koma.</p>
                             @error('price_per_person')<p class="field-error">{{ $message }}</p>@enderror
+                        </div>
+
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="unit-default-employee-subsidy" class="label">Default Subsidi Pegawai / Porsi</label>
+                                <div class="relative">
+                                    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
+                                    <input id="unit-default-employee-subsidy" type="number" inputmode="numeric" min="0" step="1" wire:model="default_employee_subsidy_rate" class="input pl-10" placeholder="4000" />
+                                </div>
+                                @error('default_employee_subsidy_rate')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
+                            <div>
+                                <label for="unit-default-student-subsidy" class="label">Default Subsidi Siswa / Siswa</label>
+                                <div class="relative">
+                                    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">Rp</span>
+                                    <input id="unit-default-student-subsidy" type="number" inputmode="numeric" min="0" step="1" wire:model="default_student_subsidy_rate" class="input pl-10" placeholder="1000" />
+                                </div>
+                                @error('default_student_subsidy_rate')<p class="field-error">{{ $message }}</p>@enderror
+                            </div>
                         </div>
 
                         <div>
