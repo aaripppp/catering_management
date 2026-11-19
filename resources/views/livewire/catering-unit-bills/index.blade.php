@@ -49,6 +49,19 @@
                     </span>
                 </button>
 
+                <button
+                    type="button"
+                    wire:click="openRepriceConfirmation"
+                    wire:loading.attr="disabled"
+                    wire:target="openRepriceConfirmation"
+                    class="inline-flex h-11 w-full min-w-[260px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-5 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    Sinkronkan dengan Harga Terbaru
+                </button>
+
                 @if ($invoiceReady)
                     <a
                         href="{{ route('catering-unit-bills.invoice.all', ['month' => $month, 'year' => $year]) }}"
@@ -288,6 +301,34 @@
             </table>
         </div>
     </section>
+
+    @if ($showRepriceModal)
+        <div class="fixed inset-0 z-[10002] flex items-center justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="unit-reprice-modal-title">
+            <div wire:click="closeRepriceModal" class="absolute inset-0 bg-slate-950/60" aria-hidden="true"></div>
+            <div class="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-amber-200 bg-white shadow-xl">
+                <div class="border-b border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
+                    <h3 id="unit-reprice-modal-title" class="font-semibold text-slate-900">Sinkronkan dengan Harga Terbaru?</h3>
+                    <p class="mt-1 text-sm font-medium text-amber-800">Periode {{ $monthOptions[$month] }} {{ $year }}</p>
+                </div>
+                <div class="space-y-3 px-5 py-5 text-sm text-slate-600 sm:px-6">
+                    <p>Harga attendance Unit pada periode ini akan diperbarui mengikuti harga master Unit saat ini. Tagihan, subsidi, sisa pembayaran, dan kredit dapat ikut berubah.</p>
+                    @if ($repriceHasFinancialHistory)
+                        <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+                            Periode ini memiliki riwayat pembayaran atau kredit. Pembayaran tidak akan dihapus, tetapi saldo dan alokasi kredit akan dihitung ulang.
+                        </div>
+                    @endif
+                    <p class="text-xs text-slate-500">Periode lain tidak akan diubah.</p>
+                </div>
+                <div class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-6">
+                    <button type="button" wire:click="closeRepriceModal" class="btn-secondary whitespace-nowrap">Batal</button>
+                    <button type="button" wire:click="repriceWithCurrentMasterPrice" wire:loading.attr="disabled" wire:target="repriceWithCurrentMasterPrice" class="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60">
+                        <span wire:loading.remove wire:target="repriceWithCurrentMasterPrice">Ya, Sinkronkan Harga</span>
+                        <span wire:loading wire:target="repriceWithCurrentMasterPrice">Menyinkronkan...</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    @endif
 
     @if ($showPaymentModal && $paymentBillId && $paymentBill && $paymentSummary)
         <div class="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="unit-payment-modal-title">

@@ -14,6 +14,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Throwable;
 
@@ -46,6 +47,12 @@ class Index extends Component
     public ?int $deletingPaymentId = null;
 
     public bool $showSubsidyModal = false;
+
+    #[Locked]
+    public bool $showRepriceModal = false;
+
+    #[Locked]
+    public bool $repriceHasFinancialHistory = false;
 
     public ?int $subsidyBillId = null;
 
@@ -115,6 +122,66 @@ class Index extends Component
             message: $bills->isEmpty()
                 ? 'Tidak ada data absensi atau tagihan unit untuk disinkronkan.'
                 : $bills->count().' tagihan unit berhasil disinkronkan.',
+        );
+    }
+
+    public function openRepriceConfirmation(): void
+    {
+        Gate::authorize('sync', CateringUnitBill::class);
+        $validated = $this->validate($this->periodRules());
+
+        $this->repriceHasFinancialHistory = CateringUnitBill::query()
+            ->where('period_month', $validated['month'])
+            ->where('period_year', $validated['year'])
+            ->where(function ($query): void {
+                $query->whereHas('payments')
+                    ->orWhereHas('generatedCredits')
+                    ->orWhereHas('creditAllocations');
+            })
+            ->exists();
+        $this->showRepriceModal = true;
+    }
+
+    public function closeRepriceModal(): void
+    {
+        $this->showRepriceModal = false;
+        $this->repriceHasFinancialHistory = false;
+    }
+
+    public function repriceWithCurrentMasterPrice(CateringUnitBillingService $billingService): void
+    {
+        Gate::authorize('sync', CateringUnitBill::class);
+
+        if (! $this->showRepriceModal) {
+            return;
+        }
+
+        $validated = $this->validate($this->periodRules());
+
+        try {
+            $bills = $billingService->repricePeriodWithCurrentMasterPrice(
+                month: $validated['month'],
+                year: $validated['year'],
+                generatedBy: auth()->id(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatch(
+                'toast',
+                type: 'danger',
+                message: 'Harga terbaru gagal disinkronkan. Tidak ada perubahan yang disimpan.',
+            );
+
+            return;
+        }
+
+        $this->closeRepriceModal();
+        $this->dispatch(
+            'toast',
+            type: $bills->isEmpty() ? 'info' : 'success',
+            message: $bills->isEmpty()
+                ? 'Tidak ada data absensi atau tagihan unit untuk diperbarui.'
+                : $bills->count().' tagihan unit berhasil disinkronkan dengan harga terbaru.',
         );
     }
 

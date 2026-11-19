@@ -369,6 +369,24 @@ it('uses historical bill pricing rather than the current master price', function
         ->and($invoice['priceLabel'])->toBe('Rp 13.000');
 });
 
+it('shows the repriced selected-period snapshot on the unit invoice', function () {
+    $unit = CateringEmployeeUnit::factory()->create([
+        'name' => 'Daycare',
+        'price_per_person' => 5500,
+    ]);
+    $bill = createSynchronizedUnitInvoiceBill($unit, days: [
+        ['date' => '2026-10-01', 'quantity' => 167, 'price' => 13000],
+    ]);
+
+    app(CateringUnitBillingService::class)->repricePeriodWithCurrentMasterPrice(10, 2026);
+    $invoice = app(CateringUnitInvoiceService::class)->buildInvoice($bill->refresh());
+
+    expect($invoice['pricePerPerson'])->toBe(5500)
+        ->and($invoice['priceLabel'])->toBe('Rp 5.500')
+        ->and($invoice['grossAmount'])->toBe(918500)
+        ->and($invoice['days'][0]['pricePerPerson'])->toBe(5500);
+});
+
 it('blocks stale bills until they are explicitly resynchronized', function () {
     $unit = CateringEmployeeUnit::factory()->create();
     $bill = createSynchronizedUnitInvoiceBill($unit);

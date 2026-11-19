@@ -348,6 +348,40 @@ it('uses historical bill snapshots instead of the current unit master price', fu
     ])->and($invoice['grandTotalAmount'])->toBe(130000);
 });
 
+it('reflects targeted repricing in the combined invoice', function () {
+    $daycare = CateringEmployeeUnit::factory()->create([
+        'name' => 'Daycare',
+        'price_per_person' => 5500,
+    ]);
+    $tk = CateringEmployeeUnit::factory()->create([
+        'name' => 'TK',
+        'price_per_person' => 5500,
+    ]);
+    combinedSyncedBill($daycare, days: [
+        ['date' => '2026-10-01', 'quantity' => 167, 'price' => 13000],
+    ]);
+    combinedSyncedBill($tk, days: [
+        ['date' => '2026-10-01', 'quantity' => 299, 'price' => 13000],
+    ]);
+
+    app(CateringUnitBillingService::class)->repricePeriodWithCurrentMasterPrice(10, 2026);
+    $invoice = app(CateringUnitInvoiceService::class)->buildCombinedInvoice(10, 2026);
+    $pricesByUnit = array_column($invoice['rows'], 'pricePerPerson', 'unitName');
+    $grossByUnit = array_column($invoice['rows'], 'grossAmount', 'unitName');
+    ksort($pricesByUnit);
+    ksort($grossByUnit);
+
+    expect($pricesByUnit)->toBe([
+        'Daycare' => 5500,
+        'TK' => 5500,
+    ])
+        ->and($grossByUnit)->toBe([
+            'Daycare' => 918500,
+            'TK' => 1644500,
+        ])
+        ->and($invoice['grandTotalAmount'])->toBe(2563000);
+});
+
 it('keeps combined invoice dates deterministic across month and year boundaries', function (
     int $year,
     int $month,

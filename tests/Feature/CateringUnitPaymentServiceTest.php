@@ -183,6 +183,29 @@ it('preserves payments and reports overpayment when the bill is resynced downwar
         ->and($summary['status'])->toBe(CateringUnitBillPaymentStatus::Overpaid);
 });
 
+it('preserves payments and recalculates overpayment after targeted repricing', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 500]);
+    CateringUnitAttendance::factory()->create([
+        'catering_employee_unit_id' => $unit->id,
+        'attendance_date' => '2026-10-05',
+        'quantity' => 1000,
+        'price_per_person_snapshot' => 1000,
+    ]);
+    $bill = unitPaymentBilling()->syncUnitPeriod($unit->id, 10, 2026);
+    $payment = unitPaymentRecord($bill, 800_000);
+
+    unitPaymentBilling()->repricePeriodWithCurrentMasterPrice(10, 2026);
+    $summary = unitPaymentSummary($bill);
+
+    expect($payment->fresh()->amount)->toBe(800_000)
+        ->and(CateringUnitPayment::count())->toBe(1);
+    expect($summary['billed_amount'])->toBe(500_000)
+        ->and($summary['paid_amount'])->toBe(800_000)
+        ->and($summary['remaining_amount'])->toBe(0)
+        ->and($summary['overpaid_amount'])->toBe(300_000)
+        ->and($summary['status'])->toBe(CateringUnitBillPaymentStatus::Overpaid);
+});
+
 it('blocks new payments while the bill is stale but keeps existing history readable', function () {
     $unit = CateringEmployeeUnit::factory()->create();
     CateringUnitAttendance::factory()->create([

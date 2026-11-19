@@ -126,6 +126,58 @@ it('shows unsynchronized source and synchronizes it without a page reload', func
     ]);
 });
 
+it('requires confirmation before repricing the selected period from master prices', function () {
+    $unit = CateringEmployeeUnit::factory()->create([
+        'name' => 'Daycare',
+        'price_per_person' => 5500,
+    ]);
+    $attendance = createUnitBillingPageAttendance($unit, '2026-10-01', 10, 13000);
+    $admin = User::factory()->admin()->create();
+
+    $component = openUnitBillingPage($admin)
+        ->assertSee('Sinkronkan dengan Harga Terbaru')
+        ->call('repriceWithCurrentMasterPrice')
+        ->assertSet('showRepriceModal', false)
+        ->call('openRepriceConfirmation')
+        ->assertSet('showRepriceModal', true)
+        ->assertSee('Sinkronkan dengan Harga Terbaru?')
+        ->assertSee('Ya, Sinkronkan Harga')
+        ->assertSee('Periode lain tidak akan diubah.');
+
+    expect($attendance->fresh()->price_per_person_snapshot)->toBe(13000);
+
+    $component
+        ->call('closeRepriceModal')
+        ->assertSet('showRepriceModal', false);
+
+    expect($attendance->fresh()->price_per_person_snapshot)->toBe(13000);
+
+    $component
+        ->call('openRepriceConfirmation')
+        ->call('repriceWithCurrentMasterPrice')
+        ->assertSet('showRepriceModal', false)
+        ->assertSee('Rp 5.500')
+        ->assertSee('Rp 55.000')
+        ->assertDispatched('toast', type: 'success', message: '1 tagihan unit berhasil disinkronkan dengan harga terbaru.');
+
+    expect($attendance->fresh()->price_per_person_snapshot)->toBe(5500);
+});
+
+it('warns about financial balance changes when repricing a paid period', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 5500]);
+    createUnitBillingPageAttendance($unit, '2026-10-01', 10, 13000);
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    $bill->payments()->create([
+        'amount' => 100000,
+        'paid_at' => '2026-10-15',
+    ]);
+
+    openUnitBillingPage(User::factory()->admin()->create())
+        ->call('openRepriceConfirmation')
+        ->assertSet('repriceHasFinancialHistory', true)
+        ->assertSee('Pembayaran tidak akan dihapus, tetapi saldo dan alokasi kredit akan dihitung ulang.');
+});
+
 it('keeps stale bill values visible until explicit synchronization', function () {
     $unit = CateringEmployeeUnit::factory()->create();
     $attendance = createUnitBillingPageAttendance($unit, '2026-10-01', 10, 13000);

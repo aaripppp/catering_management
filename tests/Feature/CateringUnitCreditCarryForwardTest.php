@@ -129,6 +129,23 @@ it('reconciles credits after source bill resync and subsidy changes', function (
         ->and($futureBill->refresh()->creditAppliedAmount())->toBe(600);
 });
 
+it('rebuilds same-unit forward credit after targeted repricing', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 50]);
+    $otherUnit = CateringEmployeeUnit::factory()->create(['price_per_person' => 50]);
+    $sourceBill = unitCreditBill($unit, 10, 2026, 1000);
+    $futureBill = unitCreditBill($unit, 11, 2026, 600);
+    $otherBill = unitCreditBill($otherUnit, 11, 2026, 600);
+    $payment = unitCreditPayment($sourceBill, 1000, '2026-10-15');
+
+    app(CateringUnitBillingService::class)->repricePeriodWithCurrentMasterPrice(10, 2026);
+
+    expect($payment->fresh()->amount)->toBe(1000);
+    expect(CateringUnitCredit::query()->where('source_unit_bill_id', $sourceBill->id)->value('original_amount'))->toBe(500)
+        ->and($futureBill->refresh()->creditAppliedAmount())->toBe(500)
+        ->and($futureBill->refresh()->remainingAmount())->toBe(100)
+        ->and($otherBill->refresh()->creditAppliedAmount())->toBe(0);
+});
+
 it('reports recognized settlement separately and never treats allocated credit as cash income', function () {
     $unit = CateringEmployeeUnit::factory()->create();
     $sourceBill = unitCreditBill($unit, 1, 2026, 1000);

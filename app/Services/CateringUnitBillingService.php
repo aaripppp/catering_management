@@ -123,6 +123,81 @@ class CateringUnitBillingService
         return $this->synchronize($month, $year, $generatedBy);
     }
 
+    /** @return Collection<int, CateringUnitBill> */
+    public function repricePeriodWithCurrentMasterPrice(
+        int $month,
+        int $year,
+        ?int $generatedBy = null,
+    ): Collection {
+        [$start, $endExclusive] = $this->periodBounds($month, $year);
+
+        return DB::transaction(function () use ($month, $year, $generatedBy, $start, $endExclusive): Collection {
+            $sourceUnitIds = CateringUnitAttendance::query()
+                ->where('attendance_date', '>=', $start)
+                ->where('attendance_date', '<', $endExclusive)
+                ->distinct()
+                ->pluck('catering_employee_unit_id');
+            $existingBillUnitIds = CateringUnitBill::query()
+                ->where('period_month', $month)
+                ->where('period_year', $year)
+                ->pluck('catering_employee_unit_id');
+            $unitIds = $sourceUnitIds
+                ->merge($existingBillUnitIds)
+                ->map(fn (mixed $id): int => (int) $id)
+                ->unique()
+                ->sort()
+                ->values();
+
+            if ($unitIds->isEmpty()) {
+                return collect();
+            }
+
+            $units = CateringEmployeeUnit::query()
+                ->whereKey($unitIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get(['id', 'price_per_person'])
+                ->keyBy('id');
+            $attendances = CateringUnitAttendance::query()
+                ->whereIn('catering_employee_unit_id', $sourceUnitIds)
+                ->where('attendance_date', '>=', $start)
+                ->where('attendance_date', '<', $endExclusive)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get([
+                    'id',
+                    'catering_employee_unit_id',
+                    'attendance_date',
+                    'quantity',
+                    'price_per_person_snapshot',
+                    'created_at',
+                ]);
+            $now = now();
+            $updates = $attendances
+                ->filter(fn (CateringUnitAttendance $attendance): bool => $units->has($attendance->catering_employee_unit_id))
+                ->map(fn (CateringUnitAttendance $attendance): array => [
+                    'id' => $attendance->id,
+                    'catering_employee_unit_id' => $attendance->catering_employee_unit_id,
+                    'attendance_date' => $attendance->attendance_date->toDateString(),
+                    'quantity' => $attendance->quantity,
+                    'price_per_person_snapshot' => $units[$attendance->catering_employee_unit_id]->price_per_person,
+                    'created_at' => $attendance->created_at,
+                    'updated_at' => $now,
+                ])
+                ->all();
+
+            if ($updates !== []) {
+                CateringUnitAttendance::query()->upsert(
+                    $updates,
+                    ['id'],
+                    ['price_per_person_snapshot', 'updated_at'],
+                );
+            }
+
+            return $this->synchronize($month, $year, $generatedBy);
+        }, attempts: 5);
+    }
+
     public function syncUnitPeriod(
         int $unitId,
         int $month,

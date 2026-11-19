@@ -145,6 +145,84 @@ it('uses historical attendance prices after the master price changes', function 
         ->and($bill->days->first()->price_per_person_snapshot)->toBe(13000);
 });
 
+it('reprices only the selected period from current master prices', function () {
+    $daycare = CateringEmployeeUnit::factory()->create([
+        'name' => 'Daycare',
+        'price_per_person' => 5500,
+    ]);
+    $tk = CateringEmployeeUnit::factory()->create([
+        'name' => 'TK',
+        'price_per_person' => 5500,
+    ]);
+    $september = createUnitBillingAttendance($daycare, '2026-09-30', 10, 13000);
+    $octoberDaycare = createUnitBillingAttendance($daycare, '2026-10-01', 167, 13000);
+    $octoberTk = createUnitBillingAttendance($tk, '2026-10-01', 299, 13000);
+    $november = createUnitBillingAttendance($daycare, '2026-11-01', 10, 13000);
+
+    $bills = app(CateringUnitBillingService::class)
+        ->repricePeriodWithCurrentMasterPrice(10, 2026)
+        ->keyBy('catering_employee_unit_id');
+
+    expect($september->fresh()->price_per_person_snapshot)->toBe(13000)
+        ->and($octoberDaycare->fresh()->price_per_person_snapshot)->toBe(5500)
+        ->and($octoberTk->fresh()->price_per_person_snapshot)->toBe(5500)
+        ->and($november->fresh()->price_per_person_snapshot)->toBe(13000);
+    expect($bills[$daycare->id]->price_per_person_snapshot)->toBe(5500)
+        ->and($bills[$daycare->id]->total_quantity)->toBe(167)
+        ->and($bills[$daycare->id]->gross_amount)->toBe(918500);
+    expect($bills[$tk->id]->price_per_person_snapshot)->toBe(5500)
+        ->and($bills[$tk->id]->total_quantity)->toBe(299)
+        ->and($bills[$tk->id]->gross_amount)->toBe(1644500);
+});
+
+it('preserves subsidy configuration when repricing with current master prices', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 5500]);
+    createUnitBillingAttendance($unit, '2026-10-01', 10, 13000);
+    $service = app(CateringUnitBillingService::class);
+    $bill = $service->syncUnitPeriod($unit->id, 10, 2026);
+    $service->updateSubsidy($bill, [
+        'employee_subsidy_enabled' => true,
+        'employee_subsidy_rate' => 1000,
+        'student_subsidy_enabled' => true,
+        'student_subsidy_qty' => 2,
+        'student_subsidy_rate' => 500,
+    ]);
+
+    $repriced = $service->repricePeriodWithCurrentMasterPrice(10, 2026)->sole();
+
+    expect($repriced->employee_subsidy_enabled)->toBeTrue()
+        ->and($repriced->employee_subsidy_rate)->toBe(1000)
+        ->and($repriced->student_subsidy_enabled)->toBeTrue()
+        ->and($repriced->student_subsidy_qty)->toBe(2)
+        ->and($repriced->student_subsidy_rate)->toBe(500)
+        ->and($repriced->gross_amount)->toBe(55000)
+        ->and($repriced->employee_subsidy_amount)->toBe(10000)
+        ->and($repriced->student_subsidy_amount)->toBe(1000)
+        ->and($repriced->net_amount)->toBe(44000);
+});
+
+it('rolls back repriced attendance snapshots when bill synchronization fails', function () {
+    $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 5500]);
+    $attendance = createUnitBillingAttendance($unit, '2026-10-01', 10, 13000);
+    $bill = app(CateringUnitBillingService::class)->syncUnitPeriod($unit->id, 10, 2026);
+    $failingService = new class(app(CateringUnitFinancialReconciliationService::class)) extends CateringUnitBillingService
+    {
+        protected function replaceBillDays(array $billIds, array $daySnapshots): void
+        {
+            parent::replaceBillDays($billIds, $daySnapshots);
+
+            throw new RuntimeException('Forced targeted repricing failure.');
+        }
+    };
+
+    expect(fn () => $failingService->repricePeriodWithCurrentMasterPrice(10, 2026))
+        ->toThrow(RuntimeException::class, 'Forced targeted repricing failure.');
+
+    expect($attendance->fresh()->price_per_person_snapshot)->toBe(13000)
+        ->and($bill->fresh()->price_per_person_snapshot)->toBe(13000)
+        ->and($bill->fresh()->gross_amount)->toBe(130000);
+});
+
 it('supports mixed historical rates without storing a false header rate', function () {
     $unit = CateringEmployeeUnit::factory()->create(['price_per_person' => 15000]);
     createUnitBillingAttendance($unit, '2026-10-01', 10, 13000);
